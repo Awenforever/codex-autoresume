@@ -587,7 +587,25 @@ def main_daemon(once: bool = False, config_path: str | None = None,
     try:
         cfg = load_config(config_path)
     except ConfigError as e:
-        print("config error: %s" % e, flush=True)
+        msg = "config error: %s" % e
+        print(msg, flush=True)
+        # scheduled tasks swallow stdout: make fatal config errors visible
+        # in the daemon log instead of dying silently
+        try:
+            from .config import resolve_state_dir, load_config as _lc
+            fallback = _lc(config_path) if config_path and \
+                os.path.exists(config_path) else None
+            state_dir = resolve_state_dir(fallback)
+        except Exception:
+            state_dir = os.path.join(os.path.expanduser("~"),
+                                     ".codex-autoresume")
+        try:
+            os.makedirs(state_dir, exist_ok=True)
+            with open(os.path.join(state_dir, "daemon.log"), "a",
+                      encoding="utf-8") as f:
+                f.write("%s FATAL %s\n" % (_now().isoformat(), msg))
+        except OSError:
+            pass
         return 2
     daemon = Daemon(cfg)
     return daemon.run(once=once)
