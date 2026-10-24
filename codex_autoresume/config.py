@@ -46,8 +46,9 @@ DEFAULTS: dict[str, Any] = {
         # empty -> ~/.codex-autoresume
         "state_dir": "",
         "poll_interval_sec": 30,
-        # extra wait after a parsed reset time before resuming
-        "grace_after_reset_sec": 120,
+        # extra wait after a parsed reset time before resuming: quota
+        # windows do not roll on the exact minute, give them room
+        "grace_after_reset_sec": 180,
         # random extra wait (0..N) to avoid thundering-herd on shared resets
         "jitter_sec": 45,
         # per-thread minimum spacing between two resume attempts

@@ -5,8 +5,18 @@ description: Configure codex-autoresume guarding for conversations - enable/disa
 
 # AutoResume Guard control
 
-You control the codex-autoresume watcher through its MCP tools (preferred)
-or its local HTTP API at `http://127.0.0.1:8765` (fallback: `curl`).
+## 怎么用（用户指南）
+
+用户可以在任何 Codex 对话里直接说这些话，你来调用对应工具完成：
+
+- **"为当前对话开启守护"** / "守护这个任务" → `autoresume_set_guard(guard=true, title_contains=<本对话主题里最有辨识度的短语>)`
+- **"关闭守护"** → 同上，`guard=false`
+- **"这个任务跨周也要继续"** → 追加 `weekly=true`；**"周额度用完就算了"** → `weekly=false`
+- **"用 <模型> <档位> 继续"** → 追加 `model` / `effort`
+- **"看下额度/守护状态"** → `autoresume_status()`，把 5h/周窗口百分比和各会话的守护状态讲给用户
+- **"打开守护面板"** → 在应用内浏览器打开 **http://127.0.0.1:8765**（若可用浏览器/导航工具则直接打开，否则告诉用户点开该链接，Codex 默认在应用内打开）
+
+找不到当前对话时，把 `autoresume_status()` 返回的会话列表（标题+时间）展示给用户选择。
 
 ## Tools
 

@@ -88,47 +88,70 @@ font-weight:400">守护控制台</span></h1>
 <div class="chips" id="chips"></div></div>
 <div class="card" id="threads"></div>
 <div class="foot">守护仅在「任务未在运行/未暂停 且 5h 额度可用」时触发 ·
-goal 线程通过官方继续按钮语义恢复（thread/goal/set）· 周守护关闭时，周额度耗尽即永久停止</div>
+goal 线程通过官方继续按钮语义恢复（thread/goal/set，绝不注入消息）·
+跨周关闭时周额度耗尽即永久停止<br>
+用法：在 Codex 对话里直接说「为当前对话开启守护」「打开守护面板」，或在此页面开关</div>
 <div id="toast"></div>
 <script>
 const eff=["","none","minimal","low","medium","high","xhigh"];
+function fmt(v){return (v===null||v===undefined)?"—":v}
+function fmtT(s){if(!s)return "";try{
+return new Date(s*1000).toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"})}catch(e){return ""}}
 async function api(p,o){const r=await fetch(p,o?{method:"POST",
-headers:{'Content-Type':'application/json'},body:JSON.stringify(o)}:undefined);
+headers:{"Content-Type":"application/json"},body:JSON.stringify(o)}:undefined);
 return r.json()}
-function toast(m){const t=document.getElementById('toast');t.textContent=m;
-t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1400)}
-function bar(v){const c=v>=100?'full':v>=70?'warn':'';return
-`<div class="bar ${c}"><i style="width:${Math.min(100,v??0)}%"></i></div>`}
+function toast(m){const t=document.getElementById("toast");t.textContent=m;
+t.classList.add("show");setTimeout(function(){t.classList.remove("show")},1400)}
+function bar(v){const w=(v===null||v===undefined)?0:Math.min(100,v);
+const c=(v!==null&&v!==undefined&&v>=100)?"full":(v!==null&&v!==undefined&&v>=70)?"warn":"";
+return '<div class="bar '+c+'"><i style="width:'+w+'%"></i></div>'}
 async function refresh(){
-const s=await api('/api/status');
-const q=s.quota||{};
-document.getElementById('quota').innerHTML=
-`<div class="qitem"><div class="lbl"><span>5 小时窗口</span><span>${q.primary_used??'—'}%
-${q.primary_reset?`· 重置 ${new Date(q.primary_reset*1000).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}`:''}</span></div>${bar(q.primary_used)}</div>
-<div class="qitem"><div class="lbl"><span>周窗口</span><span>${q.secondary_used??'—'}%</span></div>${bar(q.secondary_used)}</div>
-<div class="qitem"><div class="lbl"><span>重置赠送</span><span>${q.credits??0} 个</span></div>
-<div style="font-size:12px;color:var(--dim);margin-top:6px">${q.allowed===false?'⚠️ 额度受限':q.allowed===true?'✓ 可正常使用':'额度状态未知'}</div></div>`;
-document.getElementById('chips').innerHTML=
-`<span class="chip ${s.paused?'':'on'}">${s.paused?'⏸ 已暂停':'● 守护中'}</span>
-<span class="chip ${s.dry_run?'':'on'}">${s.dry_run?'DRY-RUN（不发送）':'LIVE'}</span>
-<button onclick="api('/api/pause',{paused:${s.paused?false:true}}).then(()=>{toast(s.paused?'守护已恢复':'守护已暂停');refresh()})">
-${s.paused?'恢复守护':'全部暂停'}</button>`;
-const rows=(s.threads||[]).map(t=>`
-<div class="row">
- <div class="ttl"><b>${t.title||t.id.slice(0,13)}${t.is_goal?'<span class="badge">GOAL</span>':''}${t.goal_status?`<span class="badge" style="background:#3b3324;color:#e0a341">${t.goal_status}</span>`:''}</b>
- <span>最近 ${t.updated||'—'} · 恢复 ${t.resumes||0} 次${t.next_wake?` · 下次 ${t.next_wake}`:''}${t.last_outcome?` · ${t.last_outcome}`:''}</span></div>
- <div class="ctl"><label>守护</label><label class="sw"><input type="checkbox"
-  ${t.guard?'checked':''} onchange="setT('${t.id}',{guard:this.checked})"><i></i></label></div>
- <div class="ctl"><label>跨周</label><label class="sw"><input type="checkbox"
-  ${t.weekly?'checked':''} onchange="setT('${t.id}',{weekly:this.checked})"><i></i></label></div>
- <div class="ctl"><label>模型</label><input type="text" value="${t.model||''}"
-  placeholder="继承线程" onchange="setT('${t.id}',{model:this.value})"></div>
- <div class="ctl"><label>Reasoning</label><select onchange="setT('${t.id}',{effort:this.value})">
-  ${eff.map(e=>`<option ${e===(t.effort||'')?'selected':''} value="${e}">${e||'继承'}</option>`).join('')}</select></div>
-</div>`).join('');
-document.getElementById('threads').innerHTML=rows||
+let s;try{s=await api("/api/status")}catch(e){
+document.getElementById("quota").innerHTML=
+'<div class="qitem"><div class="lbl"><span>守护进程</span></div>'+
+'<div style="font-size:13px;color:var(--danger);margin-top:6px">连接失败——守护进程未运行？</div></div>';return}
+const q=s.quota;
+let qh="";
+if(!q){
+qh='<div class="qitem"><div class="lbl"><span>额度快照</span></div>'+
+'<div style="font-size:12px;color:var(--dim);margin-top:6px">暂不可用（网络波动），守护仍按重置时间工作</div></div>';
+}else{
+const r1=fmtT(q.primary_reset),r2=fmtT(q.secondary_reset);
+qh='<div class="qitem"><div class="lbl"><span>5 小时窗口</span><span>'+fmt(q.primary_used)+
+"%"+(r1?" · 重置 "+r1:"")+"</span></div>"+bar(q.primary_used)+"</div>"+
+'<div class="qitem"><div class="lbl"><span>周窗口</span><span>'+fmt(q.secondary_used)+"%</span></div>"+
+bar(q.secondary_used)+"</div>"+
+'<div class="qitem"><div class="lbl"><span>重置赠送</span><span>'+fmt(q.credits)+" 个</span></div>"+
+'<div style="font-size:12px;color:var(--dim);margin-top:6px">'+
+(q.allowed===false?"⚠️ 额度受限":q.allowed===true?"✓ 可正常使用":"额度状态未知")+
+(q.fetched_at?" · 快照 "+String(q.fetched_at).slice(11,16):"")+"</div></div>";
+}
+document.getElementById("quota").innerHTML=qh;
+document.getElementById("chips").innerHTML=
+'<span class="chip '+(s.paused?"":"on")+'">'+(s.paused?"⏸ 已暂停":"● 守护中")+"</span>"+
+'<span class="chip '+(s.dry_run?"":"on")+'">'+(s.dry_run?"DRY-RUN（不发送）":"LIVE")+"</span>"+
+'<button onclick="api(\'/api/pause\',{paused:'+(s.paused?false:true)+'}).then(function(){toast(s.paused?\'守护已恢复\':\'守护已暂停\');refresh()})">'+
+(s.paused?"恢复守护":"全部暂停")+"</button>";
+const rows=(s.threads||[]).map(function(t){
+const gs=t.goal_status?'<span class="badge" style="background:#3b3324;color:#e0a341">'+t.goal_status+"</span>":"";
+return '<div class="row">'+
+' <div class="ttl"><b>'+((t.title||"")||(t.id||"").slice(0,13))+
+(t.is_goal?'<span class="badge">GOAL</span>':"")+gs+"</b>"+
+'<span>最近 '+fmt(t.updated)+" · 恢复 "+fmt(t.resumes)+" 次"+
+(t.next_wake?" · 下次 "+String(t.next_wake).replace("T"," ").slice(5,16):"")+
+(t.last_outcome?" · "+t.last_outcome:"")+"</span></div>"+
+' <div class="ctl"><label>守护</label><label class="sw"><input type="checkbox"'+
+(t.guard?" checked":"")+' onchange="setT(\''+t.id+'\',{guard:this.checked})"><i></i></label></div>'+
+' <div class="ctl"><label>跨周</label><label class="sw"><input type="checkbox"'+
+(t.weekly?" checked":"")+' onchange="setT(\''+t.id+'\',{weekly:this.checked})"><i></i></label></div>'+
+' <div class="ctl"><label>模型</label><input type="text" value="'+(t.model||"")+
+'" placeholder="继承线程" onchange="setT(\''+t.id+'\',{model:this.value})"></div>'+
+' <div class="ctl"><label>Reasoning</label><select onchange="setT(\''+t.id+'\',{effort:this.value})">'+
+eff.map(function(e){return '<option '+((e===(t.effort||""))?"selected":"")+' value="'+e+'">'+(e||"继承")+"</option>"}).join("")+
+"</select></div></div>"}).join("");
+document.getElementById("threads").innerHTML=rows||
 '<div class="sub" style="padding:8px 0">暂无近期会话——打开一个对话后刷新即可看到</div>';}
-async function setT(id,o){await api('/api/threads/'+id,o);toast('已更新');refresh()}
+async function setT(id,o){await api("/api/threads/"+id,o);toast("已更新");refresh()}
 refresh();setInterval(refresh,15000);
 </script></body></html>"""
 
@@ -240,6 +263,7 @@ class ControlApi:
                 "secondary_reset": snap.secondary.resets_at,
                 "credits": len(snap.reset_credits),
                 "allowed": snap.ordinary_usage_allowed,
+                "fetched_at": getattr(d, "_snapshot_wall", None),
             }
         return {
             "paused": bool(st and st.paused),

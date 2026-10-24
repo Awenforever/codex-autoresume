@@ -45,6 +45,7 @@ class Daemon:
         self.apiserver: AppServerClient | None = None
         self._snapshot: QuotaSnapshot | None = None
         self._snapshot_at: float = 0.0
+        self._snapshot_wall: str | None = None
         self._state_mtime: float = 0.0
         self._resume_pool = ThreadPoolExecutor(
             max_workers=cfg["general"]["max_concurrent_resumes"],
@@ -289,8 +290,9 @@ class Daemon:
             return self._snapshot
         try:
             from .ratelimits import fetch_quota_snapshot
-            self._snapshot = fetch_quota_snapshot(self.codex_bin, attempts=1)
+            self._snapshot = fetch_quota_snapshot(self.codex_bin, attempts=2)
             self._snapshot_at = time.monotonic()
+            self._snapshot_wall = _now().isoformat(timespec="seconds")
             p, s = self._snapshot.primary, self._snapshot.secondary
             log.info("quota snapshot: ordinaryUsageAllowed=%s primary=%s%% "
                      "secondary=%s%% credits=%d", self._snapshot.ordinary_usage_allowed,
@@ -387,7 +389,11 @@ class Daemon:
                 save_state(self.state)
                 return
             t = self.state.thread(thread_id)
-            if t.is_goal and self._goal_resume(thread_id, t, decision):
+            if t.is_goal:
+                # goal threads are ONLY ever continued via the official
+                # goal-continue action -- never via injected messages, even
+                # if the RPC path fails (retry later instead)
+                self._goal_resume(thread_id, t, decision)
                 return
             tried: list[str] = []
             model = decision.model
@@ -457,12 +463,9 @@ class Daemon:
         parked by a usage/budget limit (not running, not user-paused) and
         the thread must not have a live turn. Then: optional per-resume
         model/effort via thread/settings/update, then
-        thread/goal/set {status: active, origin: user}. No message is
-        injected into the conversation.
-
-        Returns True when handled (continued or deliberately stood down);
-        False when the caller should fall back to the exec/queue path
-        (e.g. this codex build lacks the goal RPCs).
+        thread/goal/set {status: active, origin: user}. No message is ever
+        injected. Always returns True: goal threads never fall back to the
+        exec/queue message path (failures retry later instead).
         """
         from .codexenv import CodexState
         from .ratelimits import goal_continue, RateLimitError
@@ -503,9 +506,17 @@ class Daemon:
             save_state(self.state)
             return True
         except (RateLimitError, OSError) as e:
-            log.warning("goal continue %s failed (%s); falling back to "
-                        "exec/queue path", thread_id[:8], e)
-            return False
+            t.fail_streak += 1
+            t.last_error = "goal_continue"
+            t.append_history({"at": _now().isoformat(),
+                              "kind": "goal_continue_error", "ok": False,
+                              "error_tail": str(e)[:400]})
+            t.next_wake_iso = (_now() + timedelta(minutes=10)).isoformat()
+            log.warning("goal continue %s failed (%s); NO message fallback "
+                        "for goal threads, retrying in 10 min",
+                        thread_id[:8], e)
+            save_state(self.state)
+            return True   # handled: caller must not fall back to exec/queue
 
     def _record(self, thread_id: str, outcome: ResumeOutcome, model: str | None) -> None:
         t = self.state.thread(thread_id)

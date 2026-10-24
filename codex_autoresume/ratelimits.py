@@ -170,6 +170,9 @@ class AppServerClient:
                 "title": self.client_name,
                 "version": self.client_version,
             },
+            # thread/settings/update, thread/goal/set, thread/queue/* are
+            # gated behind the experimentalApi capability
+            "capabilities": {"experimentalApi": True},
         }, timeout=INIT_TIMEOUT)
         return self._proc
 
@@ -256,7 +259,8 @@ def goal_continue(codex_bin: str, thread_id: str, model: str | None = None,
     turns first, then flips the goal back to ``active`` via
     ``thread/goal/set`` with user-origin authorization. This never injects
     a message into the conversation: the goal engine drives its own
-    continuation turns.
+    continuation turns. A failed settings update is not fatal — the goal
+    continue still proceeds with the thread's current settings.
     """
     client = AppServerClient(codex_bin)
     try:
@@ -266,7 +270,13 @@ def goal_continue(codex_bin: str, thread_id: str, model: str | None = None,
                 params["model"] = model
             if effort:
                 params["effort"] = effort
-            client._rpc("thread/settings/update", params)
+            try:
+                client._rpc("thread/settings/update", params)
+            except RateLimitError as e:
+                import logging
+                logging.getLogger("codex-autoresume").warning(
+                    "thread/settings/update failed (%s); continuing goal "
+                    "with existing thread settings", e)
         result = client._rpc("thread/goal/set", {
             "threadId": thread_id, "status": "active", "origin": origin})
         return result
