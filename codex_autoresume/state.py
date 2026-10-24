@@ -26,6 +26,11 @@ class ThreadState:
     guard_weekly: bool | None = None
     guard_model: str | None = None
     guard_effort: str | None = None
+    # custom continue prompt for non-goal threads (None = config default)
+    guard_prompt: str | None = None
+    # allow auto-consuming an official reset credit when the weekly window
+    # is exhausted (financial-ish action: strictly opt-in per thread)
+    guard_reset_card: bool | None = None
     last_kind: str = ""                 # last interruption kind
     last_reset_at: str | None = None    # ISO
     next_wake_iso: str | None = None

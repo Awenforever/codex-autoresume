@@ -15,6 +15,7 @@ class _StubDaemon:
         self.cfg = {
             "general": {"dry_run": True},
             "control_api": {"enabled": True, "host": "127.0.0.1", "port": 0},
+            "resume": {"prompt_generic": "默认继续指令"},
         }
         self.state_path = os.path.join(state_dir, "state.json")
         self.state = WatcherState(state_path=self.state_path)

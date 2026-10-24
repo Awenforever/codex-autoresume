@@ -24,15 +24,16 @@ APP_DIR_NAME = ".codex-autoresume"
 DEFAULT_PROMPT_GOAL = (
     "Your previous turn was interrupted because the account usage limit was "
     "exhausted. The quota window has now reset. Continue pursuing the thread "
-    "goal from where it stopped: briefly restate current progress (1-3 "
-    "lines), then keep working until the goal is complete."
+    "goal from where it stopped."
 )
 
+# Kept deliberately minimal: the resumed thread re-reads its whole context
+# anyway, so the prompt must only (1) tell the model to continue exactly
+# where it stopped and (2) suppress the expensive failure modes -- progress
+# recaps, re-confirmation questions, redoing finished steps.
 DEFAULT_PROMPT_GENERIC = (
-    "Your previous turn was interrupted because the account usage limit was "
-    "exhausted. The quota window has now reset. Continue the task you were "
-    "working on from the exact point of interruption. Do not restart from "
-    "scratch and do not re-ask for confirmation."
+    "继续未完成的任务：从中断处直接接着做；不要总结、复述进度或重新确认，"
+    "已完成的部分不要重做。"
 )
 
 DEFAULTS: dict[str, Any] = {

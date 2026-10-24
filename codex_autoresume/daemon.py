@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -48,6 +49,9 @@ class Daemon:
         self._snapshot_wall: str | None = None
         self._models: list[dict] | None = None
         self._models_at: float = 0.0
+        self._usage_samples: list[tuple] = []
+        self._seen_credit_ids: set[str] = set()
+        self._notified_credits = False
         self._state_mtime: float = 0.0
         self._resume_pool = ThreadPoolExecutor(
             max_workers=cfg["general"]["max_concurrent_resumes"],
@@ -161,6 +165,7 @@ class Daemon:
                         if g.get("status") in ("usage_limited", "budget_limited")}
         busy = codex.busy_threads()
         snapshot = self._quota_snapshot(force=bool(self._need_snapshot()))
+        self._maybe_consume_reset_card(snapshot)
 
         # fold new events into thread states
         for e in events:
@@ -295,6 +300,75 @@ class Daemon:
                 self._models = []
         return self._models or []
 
+    def _watch_reset_credits(self) -> None:
+        """Monitor officially granted reset credits and announce new ones."""
+        snap = self._snapshot
+        if snap is None:
+            return
+        ids = {c.id for c in snap.reset_credits}
+        if self._seen_credit_ids:
+            fresh = ids - self._seen_credit_ids
+            for c in snap.reset_credits:
+                if c.id in fresh:
+                    log.info("reset credit granted: %s (%s, expires %s)",
+                             c.title or c.id, c.status,
+                             c.expires_at or "never")
+                    self._notify("account", "reset_credit_granted",
+                                 "%s expires=%s" % (c.title or c.id,
+                                                    c.expires_at))
+        self._seen_credit_ids = ids
+
+    def _maybe_consume_reset_card(self, snapshot) -> None:
+        """Auto-redeem a reset credit when the weekly window is exhausted.
+
+        Only fires when (a) some guarded thread opted in via the panel,
+        (b) the secondary window is at 100%, and (c) a credit is actually
+        available. One redemption frees the whole account; a 30-minute
+        cooldown prevents runaway loops.
+        """
+        if snapshot is None or not snapshot.reset_credits:
+            return
+        if snapshot.secondary.used_percent is None \
+                or snapshot.secondary.used_percent < 100:
+            return
+        qualifying = [
+            (tid, t) for tid, t in self.state.threads.items()
+            if t.tracked and t.guard_reset_card
+            and t.last_kind == "usage_weekly"
+        ]
+        if not qualifying:
+            return
+        last = None
+        for tid, t in self.state.threads.items():
+            for h in t.history[-3:]:
+                if h.get("kind") == "reset_card_consumed":
+                    ts = h.get("at")
+                    if ts and ts > (last or ""):
+                        last = ts
+        if last:
+            try:
+                age_min = (_now() - datetime.fromisoformat(last)).total_seconds() / 60
+                if age_min < 30:
+                    return
+            except ValueError:
+                pass
+        import uuid
+        from .ratelimits import consume_reset_credit, RateLimitError
+        try:
+            result = consume_reset_credit(self.codex_bin,
+                                          str(uuid.uuid4()))
+            log.info("reset credit consumed for weekly-exhausted guarded "
+                     "threads (%s): %s", [tid[:8] for tid, _ in qualifying],
+                     json.dumps(result, ensure_ascii=False)[:200])
+            for tid, t in qualifying:
+                t.append_history({"at": _now().isoformat(),
+                                  "kind": "reset_card_consumed", "ok": True})
+                t.next_wake_iso = None       # re-evaluate next tick
+                self._notify(tid, "reset_card_consumed")
+            save_state(self.state)
+        except (RateLimitError, OSError) as e:
+            log.warning("reset credit consumption failed: %s", e)
+
     def _quota_snapshot(self, force: bool = False) -> QuotaSnapshot | None:
         """One-shot snapshot (spawn + read + close, no orphan children).
 
@@ -311,6 +385,12 @@ class Daemon:
             self._snapshot = fetch_quota_snapshot(self.codex_bin, attempts=2)
             self._snapshot_at = time.monotonic()
             self._snapshot_wall = _now().isoformat(timespec="seconds")
+            from .usage import add_sample
+            self._usage_samples = add_sample(
+                self._usage_samples,
+                self._snapshot.primary.used_percent,
+                self._snapshot.secondary.used_percent)
+            self._watch_reset_credits()
             p, s = self._snapshot.primary, self._snapshot.secondary
             log.info("quota snapshot: ordinaryUsageAllowed=%s primary=%s%% "
                      "secondary=%s%% credits=%d", self._snapshot.ordinary_usage_allowed,
@@ -329,6 +409,10 @@ class Daemon:
                 tc["model"] = t.guard_model
             if t.guard_effort:
                 tc["reasoning_effort"] = t.guard_effort
+            if t.guard_prompt:
+                tc["prompt"] = t.guard_prompt
+            if t.guard_reset_card is not None:
+                tc["reset_card"] = t.guard_reset_card
         return tc
 
     def _sync_external_edits(self, force: bool = False) -> None:
@@ -355,6 +439,8 @@ class Daemon:
                 cur.guard_weekly = ts.guard_weekly
                 cur.guard_model = ts.guard_model
                 cur.guard_effort = ts.guard_effort
+                cur.guard_prompt = ts.guard_prompt
+                cur.guard_reset_card = ts.guard_reset_card
                 if not ts.tracked and cur.tracked:
                     log.info("unwatched %s via CLI", tid[:8])
                 cur.tracked = ts.tracked

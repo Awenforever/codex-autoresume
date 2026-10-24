@@ -270,6 +270,25 @@ def list_models(codex_bin: str) -> list[dict]:
         client.close()
 
 
+def consume_reset_credit(codex_bin: str, idempotency_key: str,
+                         credit_id: str | None = None) -> dict:
+    """Redeem one official rate-limit reset credit.
+
+    Financial-ish action: callers must gate this behind explicit per-thread
+    opt-in. *idempotency_key* identifies one logical redemption attempt
+    (reuse the same value when retrying); *credit_id* picks a specific
+    credit, or let the backend choose the next available one.
+    """
+    client = AppServerClient(codex_bin)
+    try:
+        params: dict = {"idempotencyKey": idempotency_key}
+        if credit_id:
+            params["creditId"] = credit_id
+        return client._rpc("account/rateLimitResetCredit/consume", params)
+    finally:
+        client.close()
+
+
 def goal_continue(codex_bin: str, thread_id: str, model: str | None = None,
                   effort: str | None = None, origin: str = "user") -> dict:
     """Resume a parked goal exactly like the app's Continue button.

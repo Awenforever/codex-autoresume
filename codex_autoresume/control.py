@@ -30,9 +30,9 @@ PANEL_HTML = r"""<!doctype html>
 --dim:#87929a;--accent:#10a37f;--accent-soft:#12362c;--warn:#e0a341;--danger:#e5534b}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--fg);font:14px/1.55 -apple-system,"Segoe UI",
-"Microsoft YaHei",sans-serif;padding:20px 18px 40px;max-width:920px;margin:0 auto;
+"Microsoft YaHei",sans-serif;padding:20px 18px 44px;max-width:940px;margin:0 auto;
 -webkit-font-smoothing:antialiased}
-header{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
 .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,
 #10a37f,#0a6e56);display:flex;align-items:center;justify-content:center;
 box-shadow:0 4px 18px rgba(16,163,127,.35)}
@@ -45,32 +45,30 @@ border:1px solid var(--line);color:var(--dim);background:var(--card)}
 .chip.on{border-color:rgba(16,163,127,.5);color:var(--accent);background:var(--accent-soft)}
 .chip.dry{border-color:rgba(224,163,65,.5);color:var(--warn)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;
-padding:16px 18px;margin-bottom:14px}
-.hero{display:flex;gap:26px;align-items:center;flex-wrap:wrap}
-.ring{display:flex;flex-direction:column;align-items:center;gap:2px}
-.ring svg{width:92px;height:92px;transform:rotate(-90deg)}
+padding:16px 18px;margin-bottom:13px}
+.hero{display:flex;gap:28px;align-items:center;flex-wrap:wrap}
+.ringwrap{display:flex;flex-direction:column;align-items:center;gap:4px}
+.ring{position:relative;width:92px;height:92px}
+.ring svg{width:92px;height:92px;transform:rotate(-90deg);display:block}
 .ring .track{fill:none;stroke:#1e2529;stroke-width:8}
 .ring .val{fill:none;stroke-width:8;stroke-linecap:round;transition:stroke-dashoffset .6s}
-.ring .pct{position:relative;margin-top:-64px;margin-bottom:26px;font-size:17px;
-font-weight:700;text-align:center;width:92px}
-.ring .lbl{font-size:12px;color:var(--dim)}
-.ring .reset{font-size:11px;color:var(--dim)}
-.hinfo{flex:1;min-width:190px;display:flex;flex-direction:column;gap:8px}
+.ring .pct{position:absolute;inset:0;display:flex;align-items:center;
+justify-content:center;font-size:16px;font-weight:700}
+.ringlbl{font-size:12px;color:var(--dim)}
+.ringreset{font-size:11px;color:var(--dim)}
+.hinfo{flex:1;min-width:210px;display:flex;flex-direction:column;gap:7px}
 .kv{display:flex;justify-content:space-between;font-size:13px;color:var(--dim);
-border-bottom:1px dashed var(--line);padding-bottom:6px}
-.kv b{color:var(--fg);font-weight:600}
-.kv .ok{color:var(--accent)} .kv .bad{color:var(--danger)}
+border-bottom:1px dashed var(--line);padding-bottom:5px;gap:12px}
+.kv b{color:var(--fg);font-weight:600;text-align:right}
+.kv .ok{color:var(--accent)} .kv .bad{color:var(--danger)} .kv .eta{color:var(--warn)}
 button{background:var(--card2);border:1px solid var(--line);color:var(--fg);
 border-radius:10px;padding:7px 16px;font-size:13px;cursor:pointer;
 transition:border-color .15s,transform .1s}
 button:hover{border-color:var(--accent)} button:active{transform:scale(.97)}
 .btn-main{background:var(--accent-soft);border-color:rgba(16,163,127,.4);color:var(--accent)}
-.guide{font-size:12.5px;color:var(--dim);line-height:1.7}
-.guide b{color:var(--fg)}
-.guide code{background:var(--card2);border:1px solid var(--line);border-radius:6px;
-padding:1px 7px;font-size:11.5px;color:var(--accent)}
+.btn-mini{padding:5px 10px;font-size:12px;border-radius:8px}
 .sect{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);
-text-transform:uppercase;letter-spacing:1px;margin:20px 2px 10px}
+text-transform:uppercase;letter-spacing:1px;margin:18px 2px 10px}
 .sect:after{content:"";flex:1;height:1px;background:var(--line)}
 .tcard{background:var(--card);border:1px solid var(--line);border-radius:14px;
 padding:13px 16px;margin-bottom:10px;transition:border-color .15s}
@@ -88,10 +86,18 @@ text-overflow:ellipsis;flex:1;min-width:0}
 .badge.gstat{background:#3a3320;color:var(--warn)}
 .meta{font-size:11.5px;color:var(--dim);margin:5px 0 11px 17px}
 .meta em{font-style:normal;color:#a8b3ba}
-.controls{display:flex;gap:14px;align-items:center;flex-wrap:wrap;
+.controls{display:flex;gap:16px;align-items:center;flex-wrap:wrap;
 padding-left:17px;border-top:1px solid var(--line);padding-top:11px}
-.ctl{display:flex;align-items:center;gap:7px}
+.ctl{display:flex;align-items:center;gap:7px;position:relative}
 .ctl label{font-size:12px;color:var(--dim)}
+.tip{position:relative;cursor:help}
+.tip:after{content:attr(data-tip);position:absolute;bottom:calc(100% + 8px);
+left:50%;transform:translateX(-50%);background:#20272c;color:#dfe6ea;
+font-size:11.5px;line-height:1.5;padding:7px 11px;border-radius:9px;
+white-space:normal;width:220px;border:1px solid var(--line);
+box-shadow:0 8px 22px rgba(0,0,0,.45);opacity:0;pointer-events:none;
+transition:opacity .15s;z-index:30;text-align:left}
+.tip:hover:after{opacity:1}
 .sw{position:relative;width:40px;height:22px;display:inline-block;flex:none}
 .sw input{opacity:0;width:0;height:0}
 .sw i{position:absolute;inset:0;background:#2c343a;border-radius:999px;
@@ -107,7 +113,12 @@ input::placeholder{color:#5c666d}
 select{background:var(--card2);border:1px solid var(--line);color:var(--fg);
 border-radius:9px;padding:6px 8px;font-size:12.5px;width:104px}
 select:focus{outline:none;border-color:var(--accent)}
+.prow{display:flex;gap:8px;align-items:center;padding:10px 0 0 17px;
+border-top:1px dashed var(--line);margin-top:10px;flex-wrap:wrap}
+.prow input{flex:1;min-width:220px}
 .empty{color:var(--dim);font-size:13px;text-align:center;padding:14px 0}
+.foot{color:#5f6a71;font-size:11px;text-align:center;margin-top:14px;line-height:1.7}
+.foot code{color:#3f4a52;background:none;padding:0}
 #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);
 background:var(--accent-soft);color:var(--accent);border:1px solid rgba(16,163,127,.5);
 padding:8px 18px;border-radius:11px;font-size:13px;opacity:0;transition:.25s;
@@ -126,38 +137,43 @@ pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,.4)}
 <div class="card"><div class="hero" id="quota">
  <div style="color:var(--dim);font-size:13px">加载中…</div>
 </div></div>
-<div class="card guide">
- <b>怎么用：</b>在任意 Codex 对话里说
- <code>为当前对话开启守护</code>、
- <code>这个任务跨周也要继续</code>、
- <code>用 gpt-6.1-sol high 继续</code>即可；或在下方列表直接开关。
- 开启守护的会话，只会在「<b>没有正在运行的任务 · 未被你暂停 · 5h 额度可用</b>》
- 且被额度打断过时自动继续；goal 对话走官方“继续”按钮，绝不注入消息；
- “跨周”关闭时，周额度耗尽即永久停止守护。
-</div>
 <div class="sect">近期会话</div>
 <div id="threads"></div>
+<div class="foot">打开方式：侧栏输入 <code>http://127.0.0.1:8765</code>（推荐，不消耗额度）· 桌面快捷方式 · 完整说明见插件 README</div>
 <div id="toast"></div>
 <script>
 var eff=["","none","minimal","low","medium","high","xhigh"];
 function fmt(v){return (v===null||v===undefined)?"—":v}
 function fmtT(sec){if(!sec)return "";try{return new Date(sec*1000).toLocaleTimeString(
 "zh-CN",{hour:"2-digit",minute:"2-digit"})}catch(e){return ""}}
+function fmtDT(sec){if(!sec)return "";try{return new Date(sec*1000).toLocaleString(
+"zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}catch(e){return ""}}
 function ring(pct,label,reset){
  var p=(pct===null||pct===undefined)?0:Math.min(100,pct);
  var C=213.6,off=C*(1-p/100);
  var col=(p>=100)?"#e5534b":(p>=70)?"#e0a341":"#10a37f";
- return '<div class="ring"><svg viewBox="0 0 76 76">'+
+ return '<div class="ringwrap"><div class="ring"><svg viewBox="0 0 76 76">'+
  '<circle class="track" cx="38" cy="38" r="34"/>'+
  '<circle class="val" cx="38" cy="38" r="34" stroke="'+col+
  '" stroke-dasharray="'+C+'" stroke-dashoffset="'+off+'"/></svg>'+
- '<div class="pct" style="color:'+col+'">'+fmt(pct)+"%</div>"+
- '<div class="lbl">'+label+"</div>"+
- (reset?'<div class="reset">重置 '+reset+"</div>":"")+"</div>"}
+ '<div class="pct" style="color:'+col+'">'+fmt(pct)+"%</div></div>"+
+ '<div class="ringlbl">'+label+"</div>"+
+ (reset?'<div class="ringreset">重置 '+reset+"</div>":"")+"</div>"}
+function etaRow(name,q,etaK,rateK,win){
+ var eta=q[etaK],rate=q[rateK];
+ var b;
+ if(eta){b='<b class="eta">'+fmtDT(eta)+"</b>"}
+ else if(rate){b="<b>—</b>"}
+ else{b="<b>暂无消耗</b>"}
+ var tail=(rate?(' <span style="font-size:11px">（'+rate+"%/h，按近"+win+"速度）</span>"):
+   ' <span style="font-size:11px">（按近'+win+'速度）</span>');
+ return '<div class="kv"><span>'+name+"预估耗尽</span><span>"+b+tail+"</span></div>"}
 function toast(m){var t=document.getElementById("toast");t.textContent=m;
 t.classList.add("show");setTimeout(function(){t.classList.remove("show")},1500)}
 function api(p,o){var init=o?{method:"POST",headers:{"Content-Type":"application/json"},
 body:JSON.stringify(o)}:undefined;return fetch(p,init).then(function(r){return r.json()})}
+function esc(s){return String(s===null||s===undefined?"":s).replace(/&/g,"&amp;")
+.replace(/</g,"&lt;").replace(/"/g,"&quot;")}
 function refresh(){
 return api("/api/status").then(function(s){
 window.__s=s;
@@ -170,8 +186,9 @@ ring(q.secondary_used,"周窗口",fmtT(q.secondary_reset))+
 '<div class="hinfo">'+
 '<div class="kv"><span>使用状态</span><b class="'+(q.allowed===false?"bad":"ok")+'">'+
 (q.allowed===false?"额度受限":q.allowed===true?"✓ 可正常使用":"状态未知")+"</b></div>"+
+etaRow("5h 额度",q,"eta_primary","rate_primary","1h")+
+etaRow("周额度",q,"eta_secondary","rate_secondary","5h")+
 '<div class="kv"><span>重置赠送</span><b>'+fmt(q.credits)+" 个</b></div>"+
-'<div class="kv"><span>快照时间</span><b>'+(q.fetched_at?String(q.fetched_at).slice(11,16):"—")+"</b></div>"+
 '<div style="margin-top:4px"><button class="btn-main" onclick="togglePause()">'+
 (s.paused?"▶ 恢复守护":"⏸ 全部暂停")+"</button></div></div>";
 }
@@ -182,39 +199,54 @@ document.getElementById("chips").innerHTML=
 var dl="";
 if(s.models&&s.models.length){
 dl='<datalist id="models">';
-for(var i=0;i<s.models.length;i++){dl+='<option value="'+s.models[i].id+'">'+
-s.models[i].name+"</option>"}
+for(var i=0;i<s.models.length;i++){dl+='<option value="'+esc(s.models[i].id)+'">'+
+esc(s.models[i].name)+"</option>"}
 dl+="</datalist>";
 }
+var defp=s.default_prompt||"";
 var rows="";
 var ts=s.threads||[];
 for(var i=0;i<ts.length;i++){
 var t=ts[i];
 var badges=(t.is_goal?'<span class="badge goal">GOAL</span>':"")+
-(t.goal_status?'<span class="badge gstat">'+t.goal_status+"</span>":"");
+(t.goal_status?'<span class="badge gstat">'+esc(t.goal_status)+"</span>":"");
 var tries=(t.attempts&&t.attempts>t.resumes)?"（尝试 "+t.attempts+"）":"";
+var cardSwitch='<div class="ctl tip" data-tip="周额度耗尽且账户有官方重置卡时，自动消耗一张以继续任务">'+
+'<label class="sw"><input type="checkbox"'+(t.reset_card?" checked":"")+
+' onchange="setT(\''+t.id+'\',{reset_card:this.checked})"><i></i></label>'+
+'<label>重置卡</label></div>';
+var promptRow="";
+if(!t.is_goal){
+promptRow='<div class="prow"><label style="font-size:12px;color:var(--dim)">继续指令</label>'+
+'<input type="text" id="pp_'+t.id.slice(0,8)+'" value="'+esc(t.prompt)+
+'" placeholder="'+esc(defp)+'" onchange="setT(\''+t.id+'\',{prompt:this.value})">'+
+'<button class="btn-mini" onclick="resetPrompt(\''+t.id+'\')">恢复默认</button></div>';
+}
 rows+=(i===0?dl:"")+
 '<div class="tcard '+(t.guard?"guard":"")+'">'+
 '<div class="thead"><span class="dot"></span><span class="ttl">'+
-((t.title||"")||String(t.id||"").slice(0,13))+badges+"</span></div>"+
+esc((t.title||"")||String(t.id||"").slice(0,13))+badges+"</span></div>"+
 '<div class="meta">最近 '+fmt(t.updated)+" · 成功恢复 <em>"+fmt(t.resumes)+
 "</em> 次"+tries+
 (t.next_wake?" · 下次检查 "+String(t.next_wake).replace("T"," ").slice(5,16):"")+
-(t.last_outcome?" · "+t.last_outcome:"")+"</div>"+
+(t.last_outcome?" · "+esc(t.last_outcome):"")+"</div>"+
 '<div class="controls">'+
-'<div class="ctl"><label class="sw"><input type="checkbox"'+(t.guard?" checked":"")+
+'<div class="ctl tip" data-tip="打开则表示 5h 额度耗尽后自动继续任务">'+
+'<label class="sw"><input type="checkbox"'+(t.guard?" checked":"")+
 ' onchange="setT(\''+t.id+'\',{guard:this.checked})"><i></i></label>'+
 '<label>守护</label></div>'+
-'<div class="ctl"><label class="sw"><input type="checkbox"'+(t.weekly?" checked":"")+
+'<div class="ctl tip" data-tip="打开则表示守护开启时周额度重置后也自动继续任务">'+
+'<label class="sw"><input type="checkbox"'+(t.weekly?" checked":"")+
 ' onchange="setT(\''+t.id+'\',{weekly:this.checked})"><i></i></label>'+
 '<label>跨周</label></div>'+
+cardSwitch+
 '<div class="ctl"><label>模型</label><input type="text" list="models" value="'+
-(t.model||"")+'" placeholder="继承线程" onchange="setT(\''+t.id+'\',{model:this.value})"></div>'+
+esc(t.model||"")+'" placeholder="继承线程" onchange="setT(\''+t.id+'\',{model:this.value})"></div>'+
 '<div class="ctl"><label>Reasoning</label><select onchange="setT(\''+t.id+
 '\',{effort:this.value})">';
 for(var j=0;j<eff.length;j++){rows+='<option '+((eff[j]===(t.effort||""))?"selected":"")+
 ' value="'+eff[j]+'">'+(eff[j]||"继承")+"</option>"}
-rows+="</select></div></div></div>";
+rows+="</select></div></div>"+promptRow+"</div>";
 }
 document.getElementById("threads").innerHTML=rows||
 '<div class="card empty">暂无近期会话——在 Codex 里打开一个对话后刷新即可</div>';
@@ -222,10 +254,14 @@ document.getElementById("threads").innerHTML=rows||
 document.getElementById("quota").innerHTML=
 '<div style="color:var(--danger);font-size:13px">守护进程未运行（连接失败）。启动：schtasks /Run /TN codex-autoresume</div>'})}
 function setT(id,o){api("/api/threads/"+id,o).then(function(){toast("已更新");refresh()})}
+function resetPrompt(id){api("/api/threads/"+id,{prompt:""}).then(function(){
+toast("已恢复默认指令");refresh()})}
 function togglePause(){var s=window.__s;api("/api/pause",{paused:!s.paused}).then(
 function(){toast(s.paused?"守护已恢复":"守护已暂停");refresh()})}
 refresh();setInterval(refresh,15000);
 </script></body></html>"""
+
+
 
 
 
@@ -321,6 +357,8 @@ class ControlApi:
                 "weekly": bool(tc.get("weekly_resume")),
                 "model": tc.get("model") or "",
                 "effort": tc.get("reasoning_effort") or "",
+                "prompt": tc.get("prompt") or "",
+                "reset_card": bool(tc.get("reset_card")),
                 "resumes": (t.success_resumes if t else 0),
                 "attempts": (t.total_resumes if t else 0),
                 "last_outcome": t.last_outcome if t else "",
@@ -331,6 +369,10 @@ class ControlApi:
         snap = d._snapshot
         quota = None
         if snap:
+            from .usage import eta_epoch
+            samples = getattr(d, "_usage_samples", [])
+            eta_p, rate_p = eta_epoch(samples, 1, 3600)
+            eta_s, rate_s = eta_epoch(samples, 2, 5 * 3600)
             quota = {
                 "primary_used": snap.primary.used_percent,
                 "primary_reset": snap.primary.resets_at,
@@ -339,12 +381,17 @@ class ControlApi:
                 "credits": len(snap.reset_credits),
                 "allowed": snap.ordinary_usage_allowed,
                 "fetched_at": getattr(d, "_snapshot_wall", None),
+                "eta_primary": eta_p,
+                "rate_primary": round(rate_p, 2) if rate_p else None,
+                "eta_secondary": eta_s,
+                "rate_secondary": round(rate_s, 2) if rate_s else None,
             }
         return {
             "paused": bool(st and st.paused),
             "dry_run": bool(d.cfg["general"]["dry_run"]),
             "quota": quota,
             "models": d.model_catalog(),
+            "default_prompt": d.cfg["resume"]["prompt_generic"],
             "threads": out_threads,
         }
 
@@ -369,11 +416,16 @@ class ControlApi:
             t.guard_model = str(payload["model"] or "") or None
         if "effort" in payload:
             t.guard_effort = str(payload["effort"] or "") or None
+        if "prompt" in payload:
+            t.guard_prompt = str(payload["prompt"] or "").strip() or None
+        if "reset_card" in payload:
+            t.guard_reset_card = bool(payload["reset_card"])
         save_state(st)
         self.daemon._state_mtime = os.path.getmtime(st.state_path)
         return {"thread": thread_id, "guard": t.manual,
                 "weekly": t.guard_weekly, "model": t.guard_model,
-                "effort": t.guard_effort}
+                "effort": t.guard_effort, "prompt": t.guard_prompt,
+                "reset_card": t.guard_reset_card}
 
 
 def _fmt_ms(ms: int | None) -> str | None:
