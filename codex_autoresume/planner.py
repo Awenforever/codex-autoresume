@@ -112,10 +112,22 @@ def plan_for_thread(event: InterruptionEvent,
             return Decision("skip", event.thread_id,
                             "not tracked and general.auto_track is off",
                             kind=event.kind)
-        if age_hours > float(g["auto_track_max_age_hours"]):
-            return Decision("skip", event.thread_id,
-                            "thread stale (%.1fh old) vs auto_track_max_age_hours"
-                            % age_hours, kind=event.kind)
+        # goal status is current state (never stale); turn failures must be
+        # recent or they belong to conversations the user already moved on
+        # from
+        if event.kind != "goal_limited" and event.occurred_at is not None:
+            age_h = (now - event.occurred_at).total_seconds() / 3600
+            if age_h > float(g["auto_track_max_age_hours"]):
+                return Decision("skip", event.thread_id,
+                                "interruption too old (%.1fh) for auto-track"
+                                % age_h, kind=event.kind)
+        if event.occurred_at is None and event.kind != "goal_limited":
+            # unknown age (e.g. turn without completed_at): fall back to the
+            # thread's last-update recency
+            if age_hours > float(g["auto_track_max_age_hours"]):
+                return Decision("skip", event.thread_id,
+                                "thread stale (%.1fh old) vs auto_track_max_age_hours"
+                                % age_hours, kind=event.kind)
 
     # --- budget / cooldown guards -----------------------------------------
     if tstate.resume_count_day != today:

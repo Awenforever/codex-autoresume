@@ -45,6 +45,7 @@ class Daemon:
         self.apiserver: AppServerClient | None = None
         self._snapshot: QuotaSnapshot | None = None
         self._snapshot_at: float = 0.0
+        self._state_mtime: float = 0.0
         self._resume_pool = ThreadPoolExecutor(
             max_workers=cfg["general"]["max_concurrent_resumes"],
             thread_name_prefix="resume")
@@ -73,6 +74,16 @@ class Daemon:
                  __version__, self.codex_bin, self.codex_home)
         try:
             self.state = load_state(self.state_path)
+            self._sync_external_edits(force=True)
+            first_run = not self.state.seen_sources and not self.state.turns_watermark
+            if first_run:
+                from .detect import seed_seen
+                codex = CodexState(self.codex_home)
+                self.state.seen_sources, self.state.turns_watermark = seed_seen(
+                    codex, self.state.seen_sources, self.state.turns_watermark)
+                log.info("cold start: seeded %d pre-existing failures as seen "
+                         "(watermark=%d)", len(self.state.seen_sources),
+                         self.state.turns_watermark)
             while True:
                 try:
                     self.tick()
@@ -113,6 +124,7 @@ class Daemon:
     def tick(self) -> None:
         assert self.state is not None
         now = _now()
+        self._sync_external_edits()
         if self.state.paused:
             log.debug("paused; skipping tick")
             return
@@ -237,15 +249,19 @@ class Daemon:
         return (time.monotonic() - self._snapshot_at) >= refresh
 
     def _quota_snapshot(self, force: bool = False) -> QuotaSnapshot | None:
+        """One-shot snapshot (spawn + read + close, no orphan children).
+
+        A persistent app-server child would survive a hard kill of the
+        daemon (Task Scheduler /End) and linger as an orphan.
+        """
         if not self.cfg["limits_probe"]["use_app_server"]:
             return None
         if not force and self._snapshot and \
                 (time.monotonic() - self._snapshot_at) < self.cfg["limits_probe"]["poll_sec"]:
             return self._snapshot
         try:
-            if self.apiserver is None:
-                self.apiserver = AppServerClient(self.codex_bin)
-            self._snapshot = self.apiserver.read_rate_limits()
+            from .ratelimits import fetch_quota_snapshot
+            self._snapshot = fetch_quota_snapshot(self.codex_bin, attempts=1)
             self._snapshot_at = time.monotonic()
             p, s = self._snapshot.primary, self._snapshot.secondary
             log.info("quota snapshot: ordinaryUsageAllowed=%s primary=%s%% "
@@ -253,8 +269,32 @@ class Daemon:
                      p.used_percent, s.used_percent, len(self._snapshot.reset_credits))
         except (RateLimitError, OSError) as e:
             log.warning("quota snapshot unavailable: %s", e)
-            self.apiserver = None      # respawn next time
         return self._snapshot
+
+    def _sync_external_edits(self, force: bool = False) -> None:
+        """Pick up pause/unwatch/watch edits made via the CLI while running."""
+        try:
+            mtime = os.path.getmtime(self.state_path)
+        except OSError:
+            return
+        if not force and mtime <= self._state_mtime:
+            return
+        self._state_mtime = mtime
+        try:
+            fresh = load_state(self.state_path)
+        except Exception:
+            return
+        st = self.state
+        st.paused = fresh.paused
+        for tid, ts in fresh.threads.items():
+            cur = st.threads.get(tid)
+            if cur is None:
+                st.threads[tid] = ts
+            else:
+                cur.manual = ts.manual
+                if not ts.tracked and cur.tracked:
+                    log.info("unwatched %s via CLI", tid[:8])
+                cur.tracked = ts.tracked
 
     # -------------------------------------------------------------- resumes
 
@@ -314,6 +354,17 @@ class Daemon:
                         return
                 outcome = run_command(
                     argv, timeout=float(self.cfg["general"]["resume_timeout_sec"]))
+                if (outcome.kind == "writer_conflict"
+                        and decision.mode != "queue"):
+                    # the desktop app (or another session) holds the thread's
+                    # writer: deliver through codex queue instead, which goes
+                    # via the app's own daemon and preserves thread settings
+                    log.info("%s writer conflict; falling back to codex queue",
+                             thread_id[:8])
+                    argv = build_queue_command(self.codex_bin, thread_id, prompt)
+                    outcome = run_command(
+                        argv,
+                        timeout=float(self.cfg["general"]["resume_timeout_sec"]))
                 self._record(thread_id, outcome, model)
                 if outcome.kind != "overloaded":
                     return
@@ -351,8 +402,17 @@ class Daemon:
             log.info("resume %s -> success (%.0fs)", thread_id[:8],
                      outcome.duration_sec)
         else:
-            t.fail_streak += 1
             t.last_error = outcome.kind
+            if outcome.kind == "writer_conflict":
+                # contention with the desktop app, not a real failure:
+                # retry later without counting toward the park threshold
+                t.next_wake_iso = (_now() + timedelta(minutes=10)).isoformat()
+                log.warning("resume %s -> writer conflict (app holds thread); "
+                            "recheck in 10 min", thread_id[:8])
+                self._notify(thread_id, outcome)
+                save_state(self.state)
+                return
+            t.fail_streak += 1
             if outcome.kind == "usage_limit" and outcome.reset_at_iso:
                 from .timeparse import classify_window
                 reset = datetime.fromisoformat(outcome.reset_at_iso)

@@ -67,6 +67,12 @@ class TestClassify(unittest.TestCase):
         out = classify_output(1, "", "Error: no rollout found for thread id X")
         self.assertEqual(out.kind, "no_rollout")
 
+    def test_writer_conflict(self):
+        out = classify_output(
+            1, "",
+            "Error: thread/resume: thread 01a05ddb already has an active writer (code -32600)")
+        self.assertEqual(out.kind, "writer_conflict")
+
     def test_other(self):
         out = classify_output(1, "", "Error: something else")
         self.assertEqual(out.kind, "other_error")

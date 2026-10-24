@@ -22,6 +22,10 @@ OVERLOADED_PATTERNS = [
 ]
 ARCHIVED_PATTERN = re.compile(r"is archived", re.IGNORECASE)
 NO_ROLLOUT_PATTERN = re.compile(r"no rollout found", re.IGNORECASE)
+WRITER_CONFLICT_PATTERNS = [
+    re.compile(r"already has an active writer", re.IGNORECASE),
+    re.compile(r"thread-store conflict", re.IGNORECASE),
+]
 
 
 @dataclass
@@ -94,6 +98,11 @@ def classify_output(exit_code: int, stdout: str, stderr: str) -> ResumeOutcome:
         if pat.search(blob):
             return ResumeOutcome(
                 ok=False, kind="overloaded", exit_code=exit_code,
+                stdout_tail=_tail(stdout), stderr_tail=_tail(stderr))
+    for pat in WRITER_CONFLICT_PATTERNS:
+        if pat.search(blob):
+            return ResumeOutcome(
+                ok=False, kind="writer_conflict", exit_code=exit_code,
                 stdout_tail=_tail(stdout), stderr_tail=_tail(stderr))
     if ARCHIVED_PATTERN.search(blob):
         return ResumeOutcome(ok=False, kind="archived", exit_code=exit_code,
