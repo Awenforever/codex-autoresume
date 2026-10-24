@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 DEFAULT_URL = "https://opentherank.com/codex-reset"
 UA = "codex-autoresume/0.2 (+https://github.com/codex-autoresume)"
@@ -36,6 +36,9 @@ _LANDING_RE = re.compile(
     r"(?:before|at|around|by)\s*[^<>()!?.]{3,60}", re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
 _UTC_CLOCK = re.compile(r"(\d{1,2}):(\d{2})\s*UTC")
+_PACIFIC_CLOCK = re.compile(
+    r"((?:tomorrow|today)[^0-9]{0,12})?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*"
+    r"(PST|PDT|Pacific(?:\s+Time)?)\b", re.IGNORECASE)
 _FULL_UTC = re.compile(
     r"([A-Z][a-z]{2}),\s*([A-Z][a-z]{2})\s+(\d{1,2}),\s*(\d{4}),"
     r"\s*(\d{1,2}):(\d{2})\s*UTC")
@@ -43,23 +46,61 @@ _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
            "Oct", "Nov", "Dec")
 
 
-def _strip_tags(s: str) -> str:
-    return _TAG_RE.sub("", s).replace("&amp;", "&").strip()
+def _pacific_offset_hours(now: datetime) -> int:
+    """PST (-8) or PDT (-7) by calendar approximation (2nd Sun Mar ..
+    1st Sun Nov)."""
+    import calendar
+    year = now.year
+    dst_start = datetime(year, 3, 1)
+    while dst_start.weekday() != 6 or dst_start.day < 8:
+        dst_start = dst_start.replace(day=dst_start.day + 1)
+    dst_end = datetime(year, 11, 1)
+    while dst_end.weekday() != 6:
+        dst_end = dst_end.replace(day=dst_end.day + 1)
+    return -7 if dst_start <= now.replace(tzinfo=None) < dst_end else -8
 
 
 def _localize_clocks(text: str) -> str:
-    """Append a local-time reading next to every ``HH:MM UTC`` mention."""
-    def rep(m: "re.Match") -> str:
+    """Append local-time readings next to UTC and Pacific clock times."""
+    def rep_utc(m: "re.Match") -> str:
         h, mi = int(m.group(1)), int(m.group(2))
         try:
-            now_local = datetime.now(timezone.utc).astimezone()
-            naive = datetime.now(timezone.utc).replace(
-                hour=min(h, 23), minute=min(mi, 59), second=0, microsecond=0)
-            loc = naive.astimezone()
+            loc = datetime.now(timezone.utc).replace(
+                hour=min(h, 23), minute=min(mi, 59)).astimezone()
             return "%02d:%02d UTC（本机 %s）" % (h, mi, loc.strftime("%H:%M"))
         except Exception:
             return m.group(0)
-    return _UTC_CLOCK.sub(rep, text)
+
+    def rep_pac(m: "re.Match") -> str:
+        prefix, h, mi, ampm, zone = m.groups()
+        try:
+            now = datetime.now(timezone.utc)
+            hour = int(h)
+            if ampm:
+                ap = ampm.lower()
+                if ap == "pm" and hour < 12:
+                    hour += 12
+                if ap == "am" and hour == 12:
+                    hour = 0
+            if hour > 23:
+                return m.group(0)
+            offset = _pacific_offset_hours(now)
+            base = now.replace(hour=hour, minute=int(mi or 0), second=0,
+                               microsecond=0)
+            if prefix and "tomorrow" in prefix.lower():
+                base += timedelta(days=1)
+            loc = (base + timedelta(hours=offset)).astimezone()
+            return "%s（本机 %s）" % (m.group(0).rstrip(),
+                                     loc.strftime("%m-%d %H:%M"))
+        except Exception:
+            return m.group(0)
+
+    text = _UTC_CLOCK.sub(rep_utc, text)
+    return _PACIFIC_CLOCK.sub(rep_pac, text)
+
+
+def _strip_tags(s: str) -> str:
+    return _TAG_RE.sub("", s).replace("&amp;", "&").strip()
 
 
 def parse_full_utc(text: str) -> datetime | None:
