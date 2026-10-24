@@ -48,7 +48,9 @@ class TestAnnouncements(unittest.TestCase):
         # from the quote is suppressed
         self.assertEqual(out["status_kind"], "landed")
         self.assertIn("Landed as announced", out["status"])
-        self.assertIn("本机", out["status"])           # UTC clock localized
+        # display text stays VERBATIM (no machine-tz conversion)
+        self.assertNotIn("本机", out["status"])
+        self.assertIn("UTC", out["latest_reset_local"])
         self.assertIsNone(out["landing"])
 
     def test_parse_upcoming(self):

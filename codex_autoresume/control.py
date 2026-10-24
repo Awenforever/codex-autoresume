@@ -162,7 +162,7 @@ var I18N={
 zh:{title:"Codex 守护",sub:"额度重置后自动继续任务 · 仅本机",refresh:"刷新",loading:"加载中…",
 w5:"5 小时窗口",wk:"周窗口",reset:"重置",status:"使用状态",limited:"额度受限",
 avail:"✓ 可正常使用",unknown:"状态未知",eta5:"5h 额度预估耗尽",etaw:"周额度预估耗尽",
-capped:"已按5h窗口上限折算",credits:"重置赠送",forecast:"预告",landed:"到账（实测）",
+capped:"已按5h窗口上限折算",credits:"重置赠送",forecast:"预告",landed:"到账",
 news:"动态",pauseAll:"⏸ 全部暂停",resumeAll:"▶ 全部继续",running:"守护运行中",
 pausedC:"已暂停",recent:"近期会话",
 noThread:"暂无近期会话——在 Codex 里打开一个对话后刷新即可",
@@ -174,6 +174,9 @@ tipGuard:"打开则表示 5h 额度耗尽后自动继续任务",
 tipWeekly:"打开则表示守护开启时周额度重置后也自动继续任务",
 tipCard:"周额度耗尽且账户有官方重置卡时，自动消耗一张以继续任务",
 quotaNA:"额度快照暂不可用（网络波动），守护仍按重置时间正常工作",
+g_usage_limited:"额度受限",g_budget_limited:"预算受限",g_active:"运行中",
+g_paused:"已暂停",g_blocked:"受阻",g_complete:"已完成",
+goalOK:"✓ 已自动继续",writerBusy:"会话被 Codex 应用占用，切走/关闭后自动接管",quotaWait:"等待额度",
 errConn:"无法连接守护进程：",errTimeout:"请求超时（8 秒无响应）",errFail:"连接失败",
 errHint:"。请点右上角「刷新」重试；若反复失败，启动：",
 upd:"已更新",restored:"已恢复默认指令",pauseOK:"守护已暂停",resumeOK:"守护已恢复",
@@ -183,7 +186,7 @@ en:{title:"Codex Guard",sub:"Auto-continue conversations after quota resets",
 refresh:"Refresh",loading:"Loading…",w5:"5h window",wk:"Weekly",reset:"Resets",
 status:"Usage",limited:"Limited",avail:"✓ Available",unknown:"Unknown",
 eta5:"5h quota ETA",etaw:"Weekly quota ETA",capped:"(capped by 5h window)",
-credits:"Reset credits",forecast:"Forecast",landed:"Landed (observed)",
+credits:"Reset credits",forecast:"Forecast",landed:"Landed",
 news:"News",pauseAll:"⏸ Pause all",resumeAll:"▶ Resume all",
 running:"Watching",pausedC:"Paused",recent:"Recent conversations",
 noThread:"No recent conversations — open one in Codex, then refresh",
@@ -195,6 +198,9 @@ tipGuard:"On: automatically continue this thread when the 5h quota resets",
 tipWeekly:"On: also continue after the weekly quota resets (Auto-resume on)",
 tipCard:"When the weekly quota runs out, spend a reset credit to keep going",
 quotaNA:"Quota snapshot unavailable — resets are still tracked",
+g_usage_limited:"quota-limited",g_budget_limited:"budget-limited",g_active:"active",
+g_paused:"paused",g_blocked:"blocked",g_complete:"complete",
+goalOK:"✓ auto-continued",writerBusy:"held by the Codex app; guard resumes once released",quotaWait:"waiting for quota",
 errConn:"Cannot reach guard daemon: ",errTimeout:"request timed out (8s)",
 errFail:"connection failed",
 errHint:". Click Refresh (top-right); if it persists start: ",
@@ -204,14 +210,17 @@ footer:"Open: type <code>http://127.0.0.1:8765</code> in the sidebar (recommende
 function L(k){var d=I18N[LNG]||I18N.zh;var v=d[k];
 return (v===undefined)?(I18N.zh[k]||k):v}
 function p2(n){return (n<10?"0":"")+n}
-function fmtHM(sec){if(!sec)return "";var d=new Date(sec*1000);
-return p2(d.getHours())+":"+p2(d.getMinutes())}
-function fmtMDHM(sec){if(!sec)return "";var d=new Date(sec*1000);
-return p2(d.getMonth()+1)+"-"+p2(d.getDate())+" "+p2(d.getHours())+":"+p2(d.getMinutes())}
+function u(d){return p2(d.getUTCMonth()+1)+"-"+p2(d.getUTCDate())+" "+
+p2(d.getUTCHours())+":"+p2(d.getUTCMinutes())}
+function fmtHM(sec){if(!sec)return "";return u(new Date(sec*1000))}
+function fmtMDHM(sec){if(!sec)return "";return u(new Date(sec*1000))}
 function fmtISO(iso){if(!iso)return "";
 if(String(iso).indexOf("T")<0)return String(iso);
 var d=new Date(iso);if(isNaN(d.getTime()))return String(iso);
-return p2(d.getMonth()+1)+"-"+p2(d.getDate())+" "+p2(d.getHours())+":"+p2(d.getMinutes())}
+return u(d)}
+function fmtMS(ms){if(!ms)return "";return u(new Date(ms))}
+function gstat(x){var k="g_"+String(x||"");var v=I18N[LNG][k];
+return (v===undefined)?String(x||""):v}
 function fmt(v){return (v===null||v===undefined)?"--":v}
 function lerp(a,b,t){return Math.round(a+(b-a)*t)}
 function hex2rgb(h){return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]}
@@ -230,10 +239,10 @@ function ring(pct,label,reset){
  '" stroke-dasharray="'+C+'" stroke-dashoffset="'+off+'"/></svg>'+
  '<div class="pct" style="color:'+col+'">'+fmt(pct)+"%</div></div>"+
  '<div class="ringlbl">'+label+"</div>"+
- (reset?'<div class="ringreset">'+L("reset")+" "+reset+"</div>":"")+"</div>"}
+ (reset?'<div class="ringreset">'+L("reset")+" "+reset+" UTC</div>":"")+"</div>"}
 function etaRow(label,q,etaK,rateK,cappedK){
  var eta=q[etaK],rate=q[rateK];
- var b=(eta?('<b class="eta">'+fmtMDHM(eta)+"</b>"):"<b>--</b>");
+ var b=(eta?('<b class="eta">'+fmtMDHM(eta)+" UTC</b>"):"<b>--</b>");
  var tail=(rate?(' <span style="font-size:11px">（'+rate+"%/h）</span>"):"");
  if(cappedK&&q[cappedK]){tail+=' <span style="font-size:11px;color:var(--dim)">'+L("capped")+"</span>"}
  return '<div class="kv"><span>'+label+"</span><span>"+b+tail+"</span></div>"}
@@ -252,7 +261,8 @@ function esc(s){return String(s===null||s===undefined?"":s).replace(/&/g,"&amp;"
 function annRowsFor(s){
  var ann=s.announcement||null,rows="";
  var fct="--";
- if(ann&&ann.upcoming_local){fct=esc(ann.upcoming_local)}
+ if(ann&&ann.status_kind==="upcoming"&&ann.status_short){
+ fct=esc(ann.status_short)}
  rows+=kvRow(L("forecast"),'<b class="eta">'+fct+"</b>");
  var cand=[];
  var evs=s.reset_events||[];
@@ -263,7 +273,7 @@ function annRowsFor(s){
  if(cand.length){
  cand.sort(function(a,b){return String(b.at).localeCompare(String(a.at))});
  var e0=cand[0];
- landTxt=fmtISO(e0.at)+" · "+(e0.kind==="weekly"?L("wk"):L("card"))}
+ landTxt=fmtISO(e0.at)+" UTC · "+(e0.kind==="weekly"?L("wk"):L("card"))}
  rows+=kvRow(L("landed"),'<b class="ok">'+esc(landTxt)+"</b>");
  if(ann&&ann.status_short){rows+='<div class="kv news"><span>'+L("news")+
  '</span><span><b style="font-weight:500" title="'+esc(ann.status||"")+'">'+
@@ -307,12 +317,15 @@ var ts=s.threads||[];
 for(var i=0;i<ts.length;i++){
 var t=ts[i];
 var badges=(t.is_goal?'<span class="badge goal">GOAL</span>':"")+
-(t.goal_status?'<span class="badge gstat">'+esc(t.goal_status)+"</span>":"");
+(t.goal_status?'<span class="badge gstat">'+esc(gstat(t.goal_status))+"</span>":"");
 var tries=(t.attempts&&t.attempts>t.resumes)?(L("tryPfx")+t.attempts+L("trySfx")):"";
+var oc=t.last_outcome;
+var ocMap={"goal_continue":"goalOK","writer_busy":"writerBusy","usage_limit":"quotaWait"};
+var ocTxt=oc?(L(ocMap[oc]||"")!==ocMap[oc]?L(ocMap[oc]):esc(oc)):"";
 var cq0=s.quota||{};
 var cc0=(cq0.credits_count!==undefined)?cq0.credits_count:cq0.credits;
 var cInfo=(cc0?("×"+cc0):L("noneC"));
-if(cc0&&cq0.credits_nearest_expiry){cInfo+=L("expirePfx")+fmtMDHM(cq0.credits_nearest_expiry)+")"}
+if(cc0&&cq0.credits_nearest_expiry){cInfo+=L("expirePfx")+fmtMDHM(cq0.credits_nearest_expiry)+" UTC)"}
 var cardSwitch='<div class="ctl tip end" data-tip="'+esc(L("tipCard"))+'">'+
 '<label class="sw"><input type="checkbox"'+(t.reset_card?" checked":"")+
 ' onchange="setT(\''+t.id+'\',{reset_card:this.checked})"><i></i></label>'+
@@ -336,10 +349,10 @@ rows+=(i===0?dl:"")+
 '<div class="tcard '+(t.guard?"guard":"")+'">'+
 '<div class="thead"><span class="dot"></span><span class="ttl">'+
 esc((t.title||"")||String(t.id||"").slice(0,13))+"</span>"+badges+"</div>"+
-'<div class="meta">'+L("lastUpd")+" "+fmt(t.updated)+" · "+L("resumed")+" <em>"+fmt(t.resumes)+
+'<div class="meta">'+L("lastUpd")+" "+fmtMS(t.updated_ms)+" UTC · "+L("resumed")+" <em>"+fmt(t.resumes)+
 "</em>"+L("times")+tries+
-(t.next_wake?(" · "+L("nextChk")+" "+String(t.next_wake).replace("T"," ").slice(5,16)):"")+
-(t.last_outcome?(" · "+esc(t.last_outcome)):"")+"</div>"+
+(t.next_wake?(" · "+L("nextChk")+" "+fmtISO(t.next_wake)+" UTC"):"")+
+(ocTxt?(" · "+ocTxt):"")+"</div>"+
 '<div class="controls">'+
 '<div class="ctl tip start" data-tip="'+esc(L("tipGuard"))+'">'+
 '<label class="sw"><input type="checkbox"'+(t.guard?" checked":"")+
@@ -483,7 +496,7 @@ class ControlApi:
                 "last_outcome": t.last_outcome if t else "",
                 "next_wake": (t.next_wake_iso[:19] if t and t.next_wake_iso
                               else None),
-                "updated": _fmt_ms(info.updated_at_ms),
+                "updated_ms": info.updated_at_ms,
             })
         snap = d._snapshot
         quota = None
@@ -564,5 +577,6 @@ class ControlApi:
 def _fmt_ms(ms: int | None) -> str | None:
     if not ms:
         return None
-    from datetime import datetime
-    return datetime.fromtimestamp(ms / 1000).strftime("%m-%d %H:%M")
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(
+        ms / 1000, tz=timezone.utc).strftime("%m-%d %H:%M") + " UTC"

@@ -173,20 +173,20 @@ def fetch_announcement(url: str = DEFAULT_URL,
             out["latest_reset"] = raw
             dt = parse_full_utc(raw)
             if dt:
-                out["latest_reset_local"] = dt.astimezone().strftime(
-                    "%m-%d %H:%M")
+                out["latest_reset_local"] = dt.strftime("%m-%d %H:%M") + " UTC"
 
         landed = _LANDED_RE.search(html)
         upcoming = _LANDING_RE.search(html)
+        # display text stays VERBATIM (source timezone preserved): local
+        # conversion proved ambiguous (proxy-shifted machine timezones),
+        # so users read the original announcement exactly as published.
         if landed:
-            out["status"] = _localize_clocks(_strip_tags(landed.group(0)))
+            out["status"] = _strip_tags(landed.group(0))
             out["status_kind"] = "landed"
         elif upcoming:
-            raw = _strip_tags(upcoming.group(0))
-            out["status"] = _localize_clocks(raw)
+            out["status"] = _strip_tags(upcoming.group(0))
             out["status_kind"] = "upcoming"
             out["landing"] = out["status"]
-            out["upcoming_local"] = _pacific_local(raw)
         if out["status"]:
             out["status_short"] = _status_short(out["status"])
         out["fetched_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
