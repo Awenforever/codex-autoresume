@@ -1,0 +1,27 @@
+{
+  "name": "codex-autoresume-guard",
+  "version": "0.2.0",
+  "description": "Guard conversations against usage-limit stalls: auto-continue threads and goals when quota windows reset.",
+  "author": {
+    "name": "codex-autoresume contributors",
+    "url": "https://github.com/codex-autoresume/codex-autoresume"
+  },
+  "license": "MIT",
+  "skills": "./skills/",
+  "mcpServers": {
+    "autoresume": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "codex_autoresume.mcp_server"]
+    }
+  },
+  "interface": {
+    "displayName": "AutoResume Guard",
+    "shortDescription": "Auto-continue conversations after usage-limit resets",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "brandColor": "#10A37F",
+    "composerIcon": "./assets/composerIcon.svg",
+    "logo": "./assets/logo.svg"
+  }
+}

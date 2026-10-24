@@ -19,8 +19,13 @@ class StateError(Exception):
 @dataclass
 class ThreadState:
     tracked: bool = False
-    manual: bool = False                # armed explicitly via `watch`
+    manual: bool = False                # armed explicitly via `watch`/UI
     is_goal: bool = False
+    # per-thread overrides set from the control UI (state-level; merged over
+    # config threads table)
+    guard_weekly: bool | None = None
+    guard_model: str | None = None
+    guard_effort: str | None = None
     last_kind: str = ""                 # last interruption kind
     last_reset_at: str | None = None    # ISO
     next_wake_iso: str | None = None

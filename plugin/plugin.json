@@ -1,0 +1,35 @@
+{
+  "name": "codex-autoresume-guard",
+  "version": "0.2.0",
+  "description": "Guard conversations against usage-limit stalls: auto-continue threads and goals when the 5h (and optionally weekly) quota window resets, with per-resume model/reasoning settings.",
+  "author": {
+    "name": "codex-autoresume contributors",
+    "url": "https://github.com/codex-autoresume/codex-autoresume"
+  },
+  "license": "MIT",
+  "skills": "./skills/",
+  "mcpServers": {
+    "autoresume": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "codex_autoresume.mcp_server"]
+    }
+  },
+  "interface": {
+    "displayName": "AutoResume Guard",
+    "shortDescription": "Auto-continue conversations after usage-limit resets",
+    "longDescription": "Keep long tasks and goals running unattended. When the ChatGPT usage limit interrupts a conversation, AutoResume Guard waits for the quota window to reset and continues it - goals via the official continue action, ordinary threads via a resume prompt - with your chosen model and reasoning effort per resume.",
+    "developerName": "codex-autoresume contributors",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": [
+      "为当前对话开启自动继续守护",
+      "Enable auto-continue guarding for this conversation with model gpt-6.1-sol and high reasoning",
+      "Show my quota windows and guard status"
+    ],
+    "brandColor": "#10A37F",
+    "composerIcon": "./assets/composerIcon.svg",
+    "logo": "./assets/logo.svg",
+    "screenshots": []
+  }
+}

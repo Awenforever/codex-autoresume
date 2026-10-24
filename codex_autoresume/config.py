@@ -67,8 +67,9 @@ DEFAULTS: dict[str, Any] = {
         # when true the daemon detects and plans but never invokes codex:
         # no prompts are ever sent (safe first-deployment mode)
         "dry_run": False,
-        # auto-track any recently-active thread that hits a usage limit
-        "auto_track": True,
+        # dry_run etc. above; auto_track defaults OFF: guarding is opt-in
+        # per conversation (control UI / `watch`), never automatic
+        "auto_track": False,
         # only auto-track threads whose last update is within this window
         "auto_track_max_age_hours": 36,
         # optional shell command run on events; {} placeholders:
@@ -107,6 +108,13 @@ DEFAULTS: dict[str, Any] = {
         # fallback gate when ordinaryUsageAllowed is unavailable:
         # resume only if primary.usedPercent is below this
         "recovery_used_percent_max": 95,
+    },
+    # local control API (127.0.0.1) serving the built-in panel and the
+    # in-app guard toggles
+    "control_api": {
+        "enabled": True,
+        "host": "127.0.0.1",
+        "port": 8765,
     },
     # per-thread overrides, keyed by thread UUID (full or prefix):
     # [threads."01a05ddb-0483-..."]

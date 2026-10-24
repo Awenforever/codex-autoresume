@@ -1,6 +1,13 @@
 # codex-autoresume example configuration.
 # Copy to ~/.codex-autoresume/config.toml and edit; every key is optional.
 
+[control_api]
+# Local-only control panel + API used by the Codex plugin
+# (open http://127.0.0.1:8765 while the daemon runs)
+enabled = true
+host = "127.0.0.1"
+port = 8765
+
 [general]
 # Master switch. While false the daemon observes and logs but never resumes.
 enabled = true
@@ -30,9 +37,10 @@ fallback_models = []
 server_overloaded_retries = 3
 server_overloaded_cooldown_sec = 180
 
-# Track any recently-active thread that hits a usage limit, even if you
-# never called `watch` on it.
-auto_track = true
+# Track threads automatically when they hit a usage limit. OFF by default:
+# guarding is opt-in per conversation via the control panel
+# (http://127.0.0.1:8765), the `watch` command, or the Codex plugin.
+auto_track = false
 auto_track_max_age_hours = 36
 
 # Optional shell command fired on resume outcomes.

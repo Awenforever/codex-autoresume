@@ -111,6 +111,36 @@ reasoning_effort = "high"
 weekly_resume = true       # also resume this thread after weekly resets
 ```
 
+## Guard semantics (v0.2)
+
+Guarding is **opt-in per conversation** — nothing is ever resumed unless you
+armed that thread:
+
+- Arm it via the **control panel** (`http://127.0.0.1:8765`, served by the
+  daemon), the `watch` command, or the bundled **Codex plugin** (composer
+  icon → "为当前对话开启自动继续守护" / natural language via its MCP tools).
+- A guarded conversation is continued **only when** it has no running turn,
+  its goal (if any) is not user-paused, and the 5-hour window actually has
+  quota left.
+- **Goal threads** are continued via the app's own goal-continue action
+  (`thread/goal/set`, origin `user`) — the programmatic equivalent of the
+  Continue button on the goal status bar. No message is injected. Optional
+  per-resume model/effort are applied first via `thread/settings/update`.
+- **Ordinary threads** resume via headless `codex exec resume` (falls back
+  to `codex queue` when the desktop app holds the thread; a live turn is
+  never injected into).
+- **Weekly window**: per-thread `weekly` toggle (default off). Off means
+  the weekly quota running out stops guarding **permanently** — even after
+  the weekly window recovers. On means the watcher waits out the multi-day
+  reset and continues.
+- Per-resume **model / reasoning effort** can be set globally, per thread in
+  config, or per thread from the control panel / plugin tools.
+
+> Note: the Codex plugin API currently allows composer icons, skills and
+> bundled MCP servers, but not arbitrary composer-bottom widgets — the
+> bundled MCP tools + panel deliver the same controls through supported
+> surfaces.
+
 ## How it works
 
 1. **Detect** — every poll it opens `~/.codex/thread_history_*.sqlite` and

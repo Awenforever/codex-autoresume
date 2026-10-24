@@ -92,9 +92,23 @@ def plan_for_thread(event: InterruptionEvent,
 
     # --- weekly window policy -------------------------------------------
     if event.kind == "usage_weekly" and not settings.weekly_enabled:
-        return Decision("skip", event.thread_id,
-                        "weekly reset not enabled (general.weekly_resume=%s)"
-                        % g["weekly_resume"], kind=event.kind)
+        # guard disabled across weeks: stop permanently -- even when the
+        # weekly window recovers, this thread must not be continued
+        return Decision("untrack", event.thread_id,
+                        "weekly guard off; stopping permanently after "
+                        "weekly-limit interruption "
+                        "(general.weekly_resume=%s)" % g["weekly_resume"],
+                        kind=event.kind)
+
+    # --- goal guards fire only with real 5h headroom ----------------------
+    if (event.kind == "goal_limited" and snapshot is not None
+            and not snapshot.has_primary_headroom()):
+        nxt = snapshot.next_reset_epoch()
+        wake = (datetime.fromtimestamp(nxt).astimezone() if nxt
+                else now + timedelta(minutes=15))
+        return Decision("wait", event.thread_id,
+                        "goal parked but 5h window exhausted",
+                        wake_at=wake, kind=event.kind)
 
     # --- thread sanity ----------------------------------------------------
     age_hours = max(0.0, (now.timestamp() * 1000 - thread_last_update_ms) / 3600000)
@@ -155,10 +169,9 @@ def plan_for_thread(event: InterruptionEvent,
     grace = g["grace_after_reset_sec"]
     jitter = random.uniform(0, g["jitter_sec"])
     candidates: list[datetime] = []
-    quota_ok_now = False
-    if snapshot is not None:
-        quota_ok_now, _ = snapshot.recovery_ok(
-            cfg["limits_probe"]["recovery_used_percent_max"])
+    # primary quota headroom is the ground-truth "5h 额度不为零" signal;
+    # ordinaryUsageAllowed can lag reality and only informs logging
+    quota_ok_now = snapshot.has_primary_headroom() if snapshot else False
     if quota_ok_now:
         # usage is already available: nothing to wait for
         candidates.append(now)
@@ -174,30 +187,28 @@ def plan_for_thread(event: InterruptionEvent,
     wake = min(candidates) if candidates else now
 
     # --- quota gate ---------------------------------------------------------
-    # The snapshot is advisory: ordinaryUsageAllowed / usedPercent can lag
-    # reality. When the reset deadline is near (or passed) we attempt
-    # anyway -- a still-limited resume fails instantly, costs nothing and
-    # re-schedules itself. A deadline far in the future means quiet waiting.
-    if snapshot is not None and now >= wake:
-        ok, why = snapshot.recovery_ok(
-            cfg["limits_probe"]["recovery_used_percent_max"])
-        if not ok:
-            deadline = event.reset_at
-            if deadline is not None:
-                snap_reset = snapshot.next_reset_epoch()
-                if snap_reset:
-                    snap_dt = datetime.fromtimestamp(snap_reset).astimezone()
-                    deadline = max(deadline, snap_dt)
-            else:
-                nxt = snapshot.next_reset_epoch()
-                deadline = (datetime.fromtimestamp(nxt).astimezone()
-                            if nxt else None)
-            if deadline is not None and deadline - now > GATE_ATTEMPT_WINDOW:
-                recheck = now + timedelta(seconds=cfg["limits_probe"]["poll_sec"])
-                return Decision("wait", event.thread_id,
-                                "quota gate: %s (reset %s away)" % (
-                                    why, deadline.isoformat()),
-                                wake_at=recheck, kind=event.kind)
+    # Primary-window headroom is the real signal. Without headroom we wait
+    # quietly; within the attempt window near the reset deadline we still
+    # try (a still-limited resume fails instantly and reschedules itself).
+    if snapshot is not None and now >= wake and not quota_ok_now:
+        deadline = event.reset_at
+        if deadline is not None:
+            snap_reset = snapshot.next_reset_epoch()
+            if snap_reset:
+                snap_dt = datetime.fromtimestamp(snap_reset).astimezone()
+                deadline = max(deadline, snap_dt)
+        else:
+            nxt = snapshot.next_reset_epoch()
+            deadline = (datetime.fromtimestamp(nxt).astimezone()
+                        if nxt else None)
+        if deadline is None or deadline - now <= GATE_ATTEMPT_WINDOW:
+            pass                     # near/at deadline: attempt below
+        else:
+            recheck = now + timedelta(seconds=cfg["limits_probe"]["poll_sec"])
+            return Decision("wait", event.thread_id,
+                            "quota gate: 5h window exhausted "
+                            "(reset %s away)" % deadline.isoformat(),
+                            wake_at=recheck, kind=event.kind)
 
     # --- busy guard ----------------------------------------------------------
     if busy:

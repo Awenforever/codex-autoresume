@@ -36,8 +36,32 @@ class TestPlanner(unittest.TestCase):
                             thread_last_update_ms=int(self.now.timestamp() * 1000),
                             busy=False, now=self.now, snapshot=None,
                             today=self.now.strftime("%Y-%m-%d"))
-        self.assertEqual(d.action, "skip")
+        # weekly guard off = stop permanently, not just skip this event
+        self.assertEqual(d.action, "untrack")
         self.assertIn("weekly", d.reason)
+
+    def test_goal_waits_without_headroom(self):
+        snap = QuotaSnapshot(ordinary_usage_allowed=False,
+                             primary=Window(used_percent=100,
+                                            resets_at=int((self.now + timedelta(hours=2)).timestamp())))
+        d = plan_for_thread(self.event("goal_limited"),
+                            ThreadState(tracked=True), base_cfg(), {},
+                            thread_last_update_ms=int(self.now.timestamp() * 1000),
+                            busy=False, now=self.now, snapshot=snap,
+                            today=self.now.strftime("%Y-%m-%d"))
+        self.assertEqual(d.action, "wait")
+        self.assertIn("5h window exhausted", d.reason)
+
+    def test_goal_due_with_headroom(self):
+        snap = QuotaSnapshot(ordinary_usage_allowed=False,
+                             primary=Window(used_percent=8,
+                                            resets_at=int((self.now + timedelta(hours=4)).timestamp())))
+        d = plan_for_thread(self.event("goal_limited"),
+                            ThreadState(tracked=True), base_cfg(), {},
+                            thread_last_update_ms=int(self.now.timestamp() * 1000),
+                            busy=False, now=self.now, snapshot=snap,
+                            today=self.now.strftime("%Y-%m-%d"))
+        self.assertEqual(d.action, "due")
 
     def test_weekly_all_waits(self):
         d = plan_for_thread(self.event("usage_weekly", self.now + timedelta(days=3)),

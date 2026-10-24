@@ -115,6 +115,14 @@ class QuotaSnapshot:
                 self.primary.used_percent, fallback_used_percent_max)
         return True, "primary used %d%% below fallback gate" % self.primary.used_percent
 
+    def has_primary_headroom(self) -> bool:
+        """True when the 5-hour window still has quota (nonzero).
+
+        usedPercent < 100 is the ground truth; ordinaryUsageAllowed can lag
+        behind reality, so it does not veto a window that shows headroom.
+        """
+        return self.primary.used_percent is None or self.primary.used_percent < 100
+
     def next_reset_epoch(self) -> int | None:
         """Earliest known reset (primary, then secondary)."""
         for w in (self.primary, self.secondary):
@@ -238,3 +246,29 @@ def fetch_quota_snapshot(codex_bin: str, attempts: int = 2) -> QuotaSnapshot:
         finally:
             client.close()
     raise last if last else RateLimitError("unreachable")
+
+
+def goal_continue(codex_bin: str, thread_id: str, model: str | None = None,
+                  effort: str | None = None, origin: str = "user") -> dict:
+    """Resume a parked goal exactly like the app's Continue button.
+
+    Optionally updates the thread's model / reasoning effort for subsequent
+    turns first, then flips the goal back to ``active`` via
+    ``thread/goal/set`` with user-origin authorization. This never injects
+    a message into the conversation: the goal engine drives its own
+    continuation turns.
+    """
+    client = AppServerClient(codex_bin)
+    try:
+        if model or effort:
+            params: dict = {"threadId": thread_id}
+            if model:
+                params["model"] = model
+            if effort:
+                params["effort"] = effort
+            client._rpc("thread/settings/update", params)
+        result = client._rpc("thread/goal/set", {
+            "threadId": thread_id, "status": "active", "origin": origin})
+        return result
+    finally:
+        client.close()

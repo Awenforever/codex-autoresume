@@ -12,16 +12,17 @@ FAKE_CODEX = textwrap.dedent("""
     if "--version" in argv:
         print("codex-cli 0.163.0-alpha.11.2 (fake)")
         sys.exit(0)
-    if argv[:2] == ["app-server"]:
-        # minimal newline-JSON app-server: initialize + rateLimits
+    if argv[:1] == ["app-server"]:
+        # minimal newline-JSON app-server: initialize + rateLimits + goal
         for line in sys.stdin:
             line = line.strip()
             if not line:
                 continue
             msg = json.loads(line)
-            if msg.get("method") == "initialize":
+            m = msg.get("method")
+            if m == "initialize":
                 resp = {"id": msg["id"], "result": {"authStatus": None}}
-            elif msg.get("method") == "account/rateLimits/read":
+            elif m == "account/rateLimits/read":
                 resp = {"id": msg["id"], "result": {
                     "ordinaryUsageAllowed": True,
                     "rateLimits": {
@@ -34,6 +35,15 @@ FAKE_CODEX = textwrap.dedent("""
                         {"id": "c1", "grantedAt": 1, "expiresAt": None,
                          "resetType": "codexRateLimits", "status": "available",
                          "title": "bonus"}]}}}
+            elif m == "thread/settings/update":
+                resp = {"id": msg["id"], "result": {}}
+            elif m == "thread/goal/set":
+                params = msg.get("params") or {}
+                resp = {"id": msg["id"], "result": {"goal": {
+                    "threadId": params.get("threadId"),
+                    "status": params.get("status", "active"),
+                    "objective": "obj", "createdAt": 1, "updatedAt": 2,
+                    "tokensUsed": 0, "timeUsedSeconds": 0}}}
             else:
                 resp = {"id": msg.get("id"), "error": "unknown method"}
             sys.stdout.write(json.dumps(resp) + "\\n")
@@ -84,7 +94,7 @@ class TestDaemonDryRun(unittest.TestCase):
             self.fake_codex = fake
 
     def test_one_tick_resumes(self):
-        from tests.test_detect import err_payload  # noqa: F401
+        
         cfg_path = os.path.join(self.root, "config.toml")
         with open(cfg_path, "w", encoding="utf-8") as f:
             f.write(textwrap.dedent("""
@@ -112,14 +122,15 @@ class TestDaemonDryRun(unittest.TestCase):
             timeout=120)
         combined = out.stdout + out.stderr
         self.assertEqual(out.returncode, 0, msg=combined[-3000:])
-        # the interrupted thread must have been resumed and recorded
+        # the interrupted goal thread must be continued via the official
+        # goal-continue path (no message injection) and recorded
         from codex_autoresume.state import load_state
         st = load_state(os.path.join(self.state_dir, "state.json"))
         t = st.threads.get("t-goal-thread")
         self.assertIsNotNone(t)
         self.assertTrue(t.tracked)
         self.assertGreaterEqual(t.total_resumes, 1)
-        self.assertEqual(t.last_outcome, "success")
+        self.assertEqual(t.last_outcome, "goal_continue")
         self.assertEqual(t.fail_streak, 0)
 
 

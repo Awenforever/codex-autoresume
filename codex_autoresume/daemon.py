@@ -75,6 +75,19 @@ class Daemon:
         try:
             self.state = load_state(self.state_path)
             self._sync_external_edits(force=True)
+            control = None
+            if self.cfg["control_api"]["enabled"]:
+                from .control import ControlApi
+                control = ControlApi(self)
+                try:
+                    control.start(self.cfg["control_api"]["host"],
+                                  int(self.cfg["control_api"]["port"]))
+                    log.info("control api on http://%s:%d/ (panel ready)",
+                             self.cfg["control_api"]["host"],
+                             self.cfg["control_api"]["port"])
+                except OSError as e:
+                    log.warning("control api failed to start: %s", e)
+                    control = None
             first_run = not self.state.seen_sources and not self.state.turns_watermark
             if first_run:
                 from .detect import seed_seen
@@ -100,10 +113,10 @@ class Daemon:
                 save_state(self.state)
             except Exception:
                 log.exception("final state save failed")
+            if control:
+                control.stop()
             lock.release()
             self._resume_pool.shutdown(wait=False)
-            if self.apiserver:
-                self.apiserver.close()
         return 0
 
     def _sleep_seconds(self) -> float:
@@ -192,6 +205,10 @@ class Daemon:
                 today=_today(now))
             t.next_wake_iso = (decision.wake_at.isoformat()
                                if decision.wake_at else None)
+            if decision.action == "untrack":
+                t.tracked = False
+                log.info("untracked %s: %s", thread_id[:8], decision.reason)
+                continue
             if decision.action == "due":
                 # exec resume does NOT inherit the thread's model/effort by
                 # itself (it falls back to config defaults); pass the
@@ -282,6 +299,18 @@ class Daemon:
             log.warning("quota snapshot unavailable: %s", e)
         return self._snapshot
 
+    def _effective_thread_config(self, thread_id: str, t) -> dict:
+        """Config [threads] merged with state-level control-UI overrides."""
+        tc = dict(thread_config(self.cfg, thread_id))
+        if t is not None:
+            if t.guard_weekly is not None:
+                tc["weekly_resume"] = t.guard_weekly
+            if t.guard_model:
+                tc["model"] = t.guard_model
+            if t.guard_effort:
+                tc["reasoning_effort"] = t.guard_effort
+        return tc
+
     def _sync_external_edits(self, force: bool = False) -> None:
         """Pick up pause/unwatch/watch edits made via the CLI while running."""
         try:
@@ -303,6 +332,9 @@ class Daemon:
                 st.threads[tid] = ts
             else:
                 cur.manual = ts.manual
+                cur.guard_weekly = ts.guard_weekly
+                cur.guard_model = ts.guard_model
+                cur.guard_effort = ts.guard_effort
                 if not ts.tracked and cur.tracked:
                     log.info("unwatched %s via CLI", tid[:8])
                 cur.tracked = ts.tracked
@@ -354,6 +386,9 @@ class Daemon:
                 t.last_outcome = "dry_run_skipped"
                 save_state(self.state)
                 return
+            t = self.state.thread(thread_id)
+            if t.is_goal and self._goal_resume(thread_id, t, decision):
+                return
             tried: list[str] = []
             model = decision.model
             for attempt in range(
@@ -381,7 +416,16 @@ class Daemon:
                         and decision.mode != "queue"):
                     # the desktop app (or another session) holds the thread's
                     # writer: deliver through codex queue instead, which goes
-                    # via the app's own daemon and preserves thread settings
+                    # via the app's own daemon and preserves thread settings.
+                    # Re-check busy first: never inject into a live turn.
+                    from .codexenv import CodexState
+                    if thread_id in CodexState(self.codex_home).busy_threads():
+                        log.info("%s turn went live; skipping queue fallback",
+                                 thread_id[:8])
+                        self._record(thread_id, ResumeOutcome(
+                            ok=False, kind="other_error", exit_code=None,
+                            stderr_tail="skipped: turn became live"), model)
+                        return
                     log.info("%s writer conflict; falling back to codex queue",
                              thread_id[:8])
                     argv = build_queue_command(self.codex_bin, thread_id, prompt)
@@ -405,6 +449,63 @@ class Daemon:
         finally:
             with self._inflight_lock:
                 self._inflight.pop(thread_id, None)
+
+    def _goal_resume(self, thread_id: str, t, decision) -> bool:
+        """Resume a parked goal like the app's Continue button.
+
+        Preconditions re-verified at send time: the goal must still be
+        parked by a usage/budget limit (not running, not user-paused) and
+        the thread must not have a live turn. Then: optional per-resume
+        model/effort via thread/settings/update, then
+        thread/goal/set {status: active, origin: user}. No message is
+        injected into the conversation.
+
+        Returns True when handled (continued or deliberately stood down);
+        False when the caller should fall back to the exec/queue path
+        (e.g. this codex build lacks the goal RPCs).
+        """
+        from .codexenv import CodexState
+        from .ratelimits import goal_continue, RateLimitError
+        try:
+            goals = {g["thread_id"]: g["status"]
+                     for g in CodexState(self.codex_home).goals()}
+            status = goals.get(thread_id)
+            if status not in ("usage_limited", "budget_limited"):
+                log.info("goal %s state is %r (running/paused/done); "
+                         "not touching it", thread_id[:8], status)
+                t.last_kind = ""
+                t.next_wake_iso = None
+                save_state(self.state)
+                return True
+            if thread_id in CodexState(self.codex_home).busy_threads():
+                log.info("goal %s has a live turn; deferring", thread_id[:8])
+                t.next_wake_iso = (_now() + timedelta(
+                    seconds=self.cfg["general"]["poll_interval_sec"])).isoformat()
+                save_state(self.state)
+                return True
+            result = goal_continue(self.codex_bin, thread_id,
+                                   model=decision.model,
+                                   effort=decision.reasoning_effort)
+            new_status = (result.get("goal") or {}).get("status")
+            entry = {"at": _now().isoformat(), "kind": "goal_continue",
+                     "ok": True, "model": decision.model,
+                     "effort": decision.reasoning_effort,
+                     "goal_status": new_status}
+            t.append_history(entry)
+            t.last_outcome = "goal_continue"
+            t.fail_streak = 0
+            t.last_kind = ""          # handed back to the goal engine
+            t.next_wake_iso = None
+            log.info("goal %s continued via thread/goal/set (status=%s, "
+                     "model=%s effort=%s)", thread_id[:8], new_status,
+                     decision.model, decision.reasoning_effort)
+            self._notify(thread_id, "goal_continue")
+            save_state(self.state)
+            return True
+        except (RateLimitError, OSError) as e:
+            log.warning("goal continue %s failed (%s); falling back to "
+                        "exec/queue path", thread_id[:8], e)
+            return False
 
     def _record(self, thread_id: str, outcome: ResumeOutcome, model: str | None) -> None:
         t = self.state.thread(thread_id)
@@ -432,7 +533,7 @@ class Daemon:
                 t.next_wake_iso = (_now() + timedelta(minutes=10)).isoformat()
                 log.warning("resume %s -> writer conflict (app holds thread); "
                             "recheck in 10 min", thread_id[:8])
-                self._notify(thread_id, outcome)
+                self._notify(thread_id, "writer_conflict")
                 save_state(self.state)
                 return
             t.fail_streak += 1
@@ -448,17 +549,18 @@ class Daemon:
             log.warning("resume %s -> %s%s", thread_id[:8], outcome.kind,
                         (" (reset %s)" % outcome.reset_at_iso)
                         if outcome.reset_at_iso else "")
-        self._notify(thread_id, outcome)
+        self._notify(thread_id, outcome.kind,
+                     outcome.stderr_tail or outcome.stdout_tail)
         save_state(self.state)
 
-    def _notify(self, thread_id: str, outcome: ResumeOutcome) -> None:
+    def _notify(self, thread_id: str, kind: str, detail: str = "") -> None:
         cmd = self.cfg["general"]["notify_command"]
         if not cmd:
             return
-        sub = (cmd.replace("{event}", "resume_" + outcome.kind)
+        sub = (cmd.replace("{event}", "resume_" + kind)
                   .replace("{thread_id}", thread_id)
-                  .replace("{reason}", outcome.kind)
-                  .replace("{detail}", (outcome.stderr_tail or "")[:200]))
+                  .replace("{reason}", kind)
+                  .replace("{detail}", detail[:200]))
         try:
             subprocess.run(sub, shell=True, timeout=30,
                            creationflags=0x08000000 if os.name == "nt" else 0)
