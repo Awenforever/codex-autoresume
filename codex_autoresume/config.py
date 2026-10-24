@@ -32,8 +32,9 @@ DEFAULT_PROMPT_GOAL = (
 # where it stopped and (2) suppress the expensive failure modes -- progress
 # recaps, re-confirmation questions, redoing finished steps.
 DEFAULT_PROMPT_GENERIC = (
-    "继续未完成的任务：从中断处直接接着做；不要总结、复述进度或重新确认，"
-    "已完成的部分不要重做。"
+    "Continue the unfinished task from exactly where it stopped. Do not "
+    "summarize or restate progress, do not ask for confirmation, and do "
+    "not redo completed steps."
 )
 
 DEFAULTS: dict[str, Any] = {

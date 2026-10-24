@@ -1,4 +1,12 @@
-"""Usage-rate estimation from quota snapshots (pure functions)."""
+"""Usage-rate estimation from quota snapshots (pure functions).
+
+Percentages come back as integers, so short baselines produce phantom rates
+(a 1-point jump over two minutes reads as 30%/h). Rates are only quoted
+after a minimum sample span, and the weekly-window estimate is capped by
+the structural maximum: weekly percentage can never rise faster than
+``(100% / 5h) * ratio`` where ``ratio = weekly% rise per primary% rise`` —
+the 5-hour window is a hard gate on how fast the weekly budget drains.
+"""
 
 from __future__ import annotations
 
@@ -16,8 +24,7 @@ def add_sample(samples: list[tuple[float, int | None, int | None]],
     now = time.time()
     if samples:
         last = samples[-1]
-        for prev in (last[1], last[2]):
-            cur = primary if prev is last[1] else secondary
+        for prev, cur in ((last[1], primary), (last[2], secondary)):
             if prev is not None and cur is not None and prev - cur > 10:
                 samples = []
                 break
@@ -26,18 +33,12 @@ def add_sample(samples: list[tuple[float, int | None, int | None]],
     return [s for s in samples if s[0] >= cutoff]
 
 
-def window_rate(samples: list[tuple], idx: int, window_sec: float,
-                now: float | None = None) -> float | None:
-    """Percent-per-hour consumption rate over the recent *window_sec*.
-
-    *idx* selects the column (1 = primary, 2 = secondary). Uses the earliest
-    sample inside the window vs. the newest one. Returns None when the rate
-    is not measurable (single sample, missing data, or no growth).
-    """
-    if not samples:
-        return None
-    now = now or time.time()
+def _baseline(samples: list[tuple], idx: int, window_sec: float,
+              min_span_sec: float, now: float) -> tuple | None:
+    """Earliest sample inside the window with usable data (None otherwise)."""
     newest = samples[-1]
+    if newest[idx] is None:
+        return None
     baseline = None
     for s in samples:
         if now - s[0] <= window_sec and s[idx] is not None:
@@ -45,6 +46,26 @@ def window_rate(samples: list[tuple], idx: int, window_sec: float,
             break
     if baseline is None or baseline is newest:
         return None
+    if newest[0] - baseline[0] < min_span_sec:
+        return None                      # too little span -> phantom rate
+    return baseline
+
+
+def window_rate(samples: list[tuple], idx: int, window_sec: float,
+                now: float | None = None,
+                min_span_sec: float = 600) -> float | None:
+    """Percent-per-hour consumption rate over the recent *window_sec*.
+
+    *idx* selects the column (1 = primary, 2 = secondary). None when the
+    rate is not measurable (insufficient span, missing data, no growth).
+    """
+    if not samples:
+        return None
+    now = now or time.time()
+    baseline = _baseline(samples, idx, window_sec, min_span_sec, now)
+    if baseline is None:
+        return None
+    newest = samples[-1]
     dv = (newest[idx] or 0) - (baseline[idx] or 0)
     dt_h = (newest[0] - baseline[0]) / 3600.0
     if dt_h <= 0 or dv <= 0:
@@ -52,17 +73,44 @@ def window_rate(samples: list[tuple], idx: int, window_sec: float,
     return dv / dt_h
 
 
+def estimate_ratio(samples: list[tuple]) -> float | None:
+    """weekly% rise per primary% rise over the full sample history.
+
+    Guards against integer granularity by requiring a primary delta of at
+    least 3 points. None when not estimable yet.
+    """
+    if len(samples) < 2:
+        return None
+    first, last = samples[0], samples[-1]
+    dp = (last[1] or 0) - (first[1] or 0)
+    ds = (last[2] or 0) - (first[2] or 0)
+    if dp >= 3 and ds > 0:
+        return ds / dp
+    return None
+
+
 def eta_epoch(samples: list[tuple], idx: int, window_sec: float,
-              now: float | None = None) -> tuple[int | None, float | None]:
-    """(eta_unix_seconds, rate_pct_per_hour) until the window hits 100%."""
+              now: float | None = None, min_span_sec: float = 600,
+              cap_pct_per_h: float | None = None
+              ) -> tuple[int | None, float | None, bool]:
+    """(eta_unix_seconds, effective_rate_pct_per_hour, rate_was_capped).
+
+    ``cap_pct_per_h`` applies the structural limit (weekly window gated by
+    the 5h window): the measured rate is clamped to the cap and flagged.
+    """
     now = now or time.time()
     if not samples or samples[-1][idx] is None:
-        return None, None
+        return None, None, False
     used = samples[-1][idx]
     if used >= 100:
-        return None, None
-    rate = window_rate(samples, idx, window_sec, now=now)
+        return None, None, False
+    rate = window_rate(samples, idx, window_sec, now=now,
+                       min_span_sec=min_span_sec)
     if rate is None:
-        return None, None
+        return None, None, False
+    capped = False
+    if cap_pct_per_h is not None and rate > cap_pct_per_h:
+        rate = cap_pct_per_h
+        capped = True
     hours = (100 - used) / rate
-    return int(now + hours * 3600), rate
+    return int(now + hours * 3600), rate, capped

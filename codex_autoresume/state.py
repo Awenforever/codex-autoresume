@@ -70,6 +70,8 @@ class WatcherState:
     paused: bool = False
     lock_path: str = ""
     state_path: str = ""
+    # official reset credits observed arriving (landing times)
+    credit_events: list[dict[str, Any]] = field(default_factory=list)
 
     # ------------------------------------------------------------------ io
 
@@ -114,6 +116,7 @@ def load_state(state_path: str) -> WatcherState:
             st.global_resume_count_today = int(raw.get("global_resume_count_today", 0))
             st.global_resume_day = raw.get("global_resume_day", "")
             st.paused = bool(raw.get("paused", False))
+            st.credit_events = list(raw.get("credit_events", []))[-20:]
         except (ValueError, TypeError) as e:
             raise StateError("corrupt state file %s: %s" % (state_path, e)) from e
     return st
@@ -130,6 +133,7 @@ def save_state(st: WatcherState) -> None:
         "global_resume_count_today": st.global_resume_count_today,
         "global_resume_day": st.global_resume_day,
         "paused": st.paused,
+        "credit_events": st.credit_events,
     }
     tmp = st.state_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:

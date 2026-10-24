@@ -41,6 +41,10 @@ class _StubDaemon:
         return [{"id": "gpt-6.1-sol", "name": "GPT-6.1 Sol"},
                 {"id": "gpt-5.6-terra", "name": "GPT-5.6 Terra"}]
 
+    def announcement(self):
+        return {"url": "https://example.com", "latest_reset": None,
+                "landing": None, "fetched_at": None}
+
 
 class TestControlApi(unittest.TestCase):
     def setUp(self):

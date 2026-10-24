@@ -136,7 +136,9 @@ pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,.4)}
 </header>
 <div class="card"><div class="hero" id="quota">
  <div style="color:var(--dim);font-size:13px">加载中…</div>
-</div></div>
+</div>
+<div class="hinfo" id="ann" style="display:none;margin:-6px 18px 13px"></div>
+</div>
 <div class="sect">近期会话</div>
 <div id="threads"></div>
 <div class="foot">打开方式：侧栏输入 <code>http://127.0.0.1:8765</code>（推荐，不消耗额度）· 桌面快捷方式 · 完整说明见插件 README</div>
@@ -148,25 +150,34 @@ function fmtT(sec){if(!sec)return "";try{return new Date(sec*1000).toLocaleTimeS
 "zh-CN",{hour:"2-digit",minute:"2-digit"})}catch(e){return ""}}
 function fmtDT(sec){if(!sec)return "";try{return new Date(sec*1000).toLocaleString(
 "zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}catch(e){return ""}}
+function lerp(a,b,t){return Math.round(a+(b-a)*t)}
+function hex2rgb(h){return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]}
+function ringColor(p){
+ // pressure gradient: green <=50, green->amber 50..80, amber->red 80..100+
+ var G=hex2rgb("#10a37f"),A=hex2rgb("#e0a341"),R=hex2rgb("#e5534b"),c;
+ if(p<=50){c=G}else if(p<=80){var t=(p-50)/30;c=[lerp(G[0],A[0],t),lerp(G[1],A[1],t),lerp(G[2],A[2],t)]}
+ else{var t2=(p-80)/20;c=[lerp(A[0],R[0],t2),lerp(A[1],R[1],t2),lerp(A[2],R[2],t2)]}
+ return "rgb("+c[0]+","+c[1]+","+c[2]+")"}
 function ring(pct,label,reset){
  var p=(pct===null||pct===undefined)?0:Math.min(100,pct);
  var C=213.6,off=C*(1-p/100);
- var col=(p>=100)?"#e5534b":(p>=70)?"#e0a341":"#10a37f";
- return '<div class="ringwrap"><div class="ring"><svg viewBox="0 0 76 76">'+
+ var col=ringColor(p);
+ return '<div class="ringwrap"><div class="ring"><svg viewBox="0 0 76 76" style="filter:drop-shadow(0 0 5px '+col+'55)">'+
  '<circle class="track" cx="38" cy="38" r="34"/>'+
  '<circle class="val" cx="38" cy="38" r="34" stroke="'+col+
  '" stroke-dasharray="'+C+'" stroke-dashoffset="'+off+'"/></svg>'+
  '<div class="pct" style="color:'+col+'">'+fmt(pct)+"%</div></div>"+
  '<div class="ringlbl">'+label+"</div>"+
  (reset?'<div class="ringreset">重置 '+reset+"</div>":"")+"</div>"}
-function etaRow(name,q,etaK,rateK,win){
+function etaRow(name,q,etaK,rateK,win,cappedK){
  var eta=q[etaK],rate=q[rateK];
  var b;
  if(eta){b='<b class="eta">'+fmtDT(eta)+"</b>"}
  else if(rate){b="<b>—</b>"}
- else{b="<b>暂无消耗</b>"}
+ else{b="<b>采样中</b>"}
  var tail=(rate?(' <span style="font-size:11px">（'+rate+"%/h，按近"+win+"速度）</span>"):
-   ' <span style="font-size:11px">（按近'+win+'速度）</span>');
+   ' <span style="font-size:11px">（按近'+win+"速度）</span>");
+ if(cappedK&&q[cappedK]){tail+=' <span style="font-size:11px;color:var(--dim)">已按5h窗口上限折算</span>'}
  return '<div class="kv"><span>'+name+"预估耗尽</span><span>"+b+tail+"</span></div>"}
 function toast(m){var t=document.getElementById("toast");t.textContent=m;
 t.classList.add("show");setTimeout(function(){t.classList.remove("show")},1500)}
@@ -187,12 +198,26 @@ ring(q.secondary_used,"周窗口",fmtT(q.secondary_reset))+
 '<div class="kv"><span>使用状态</span><b class="'+(q.allowed===false?"bad":"ok")+'">'+
 (q.allowed===false?"额度受限":q.allowed===true?"✓ 可正常使用":"状态未知")+"</b></div>"+
 etaRow("5h 额度",q,"eta_primary","rate_primary","1h")+
-etaRow("周额度",q,"eta_secondary","rate_secondary","5h")+
+etaRow("周额度",q,"eta_secondary","rate_secondary","5h","eta_secondary_capped")+
 '<div class="kv"><span>重置赠送</span><b>'+fmt(q.credits)+" 个</b></div>"+
 '<div style="margin-top:4px"><button class="btn-main" onclick="togglePause()">'+
 (s.paused?"▶ 恢复守护":"⏸ 全部暂停")+"</button></div></div>";
 }
 document.getElementById("quota").innerHTML=qh;
+var ann=s.announcement||null;
+var ce=s.credit_events||[];
+var ah="";
+if(ann&&(ann.latest_reset||ann.landing)){
+ah='<div class="kv"><span>官方重置预告</span><b style="font-weight:500">'+
+esc(ann.landing||"（暂无新预告）")+"</b></div>";
+}
+if(ce&&ce.length){
+var last=ce[ce.length-1];
+ah+='<div class="kv"><span>重置卡实际到账</span><b class="ok">'+
+esc(String(last.landed_at||"").replace("T"," ").slice(5,19))+" · "+esc(last.title||last.id)+"</b></div>";
+}
+if(ah){document.getElementById("ann").innerHTML=ah;
+document.getElementById("ann").style.display="block"}
 document.getElementById("chips").innerHTML=
 '<span class="chip '+(s.paused?"":"on")+'">'+(s.paused?"已暂停":"守护运行中")+"</span>"+
 '<span class="chip '+(s.dry_run?"dry":"on")+'">'+(s.dry_run?"DRY-RUN":"LIVE")+"</span>";
@@ -369,10 +394,15 @@ class ControlApi:
         snap = d._snapshot
         quota = None
         if snap:
-            from .usage import eta_epoch
+            from .usage import eta_epoch, estimate_ratio
             samples = getattr(d, "_usage_samples", [])
-            eta_p, rate_p = eta_epoch(samples, 1, 3600)
-            eta_s, rate_s = eta_epoch(samples, 2, 5 * 3600)
+            eta_p, rate_p, _ = eta_epoch(samples, 1, 3600)
+            # weekly drain is gated by the 5h window: cap the measured rate
+            # at (100% / 5h) * ratio  (ratio = weekly%/primary% per token)
+            ratio = estimate_ratio(samples)
+            cap = (20.0 * ratio) if ratio else 20.0
+            eta_s, rate_s, capped_s = eta_epoch(samples, 2, 5 * 3600,
+                                                cap_pct_per_h=cap)
             quota = {
                 "primary_used": snap.primary.used_percent,
                 "primary_reset": snap.primary.resets_at,
@@ -385,13 +415,20 @@ class ControlApi:
                 "rate_primary": round(rate_p, 2) if rate_p else None,
                 "eta_secondary": eta_s,
                 "rate_secondary": round(rate_s, 2) if rate_s else None,
+                "eta_secondary_capped": capped_s,
             }
+        try:
+            ann = d.announcement()
+        except Exception:
+            ann = None
         return {
             "paused": bool(st and st.paused),
             "dry_run": bool(d.cfg["general"]["dry_run"]),
             "quota": quota,
             "models": d.model_catalog(),
             "default_prompt": d.cfg["resume"]["prompt_generic"],
+            "announcement": ann,
+            "credit_events": list((st.credit_events if st else []))[-5:],
             "threads": out_threads,
         }
 

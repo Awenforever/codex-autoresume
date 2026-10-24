@@ -52,6 +52,8 @@ class Daemon:
         self._usage_samples: list[tuple] = []
         self._seen_credit_ids: set[str] = set()
         self._notified_credits = False
+        self._announcement: dict | None = None
+        self._announcement_at: float = 0.0
         self._state_mtime: float = 0.0
         self._resume_pool = ThreadPoolExecutor(
             max_workers=cfg["general"]["max_concurrent_resumes"],
@@ -301,7 +303,11 @@ class Daemon:
         return self._models or []
 
     def _watch_reset_credits(self) -> None:
-        """Monitor officially granted reset credits and announce new ones."""
+        """Monitor officially granted reset credits and announce new ones.
+
+        Landing time = local detection wall time (persisted to state as
+        credit_events); the external tracker feed only provides 预告.
+        """
         snap = self._snapshot
         if snap is None:
             return
@@ -310,13 +316,35 @@ class Daemon:
             fresh = ids - self._seen_credit_ids
             for c in snap.reset_credits:
                 if c.id in fresh:
-                    log.info("reset credit granted: %s (%s, expires %s)",
-                             c.title or c.id, c.status,
-                             c.expires_at or "never")
+                    landed = _now().isoformat(timespec="seconds")
+                    log.info("reset credit granted: %s (%s, expires %s) "
+                             "landed %s", c.title or c.id, c.status,
+                             c.expires_at or "never", landed)
+                    self.state.credit_events.append({
+                        "id": c.id, "title": c.title or c.id,
+                        "status": c.status, "expires_at": c.expires_at,
+                        "landed_at": landed})
+                    self.state.credit_events = self.state.credit_events[-20:]
+                    save_state(self.state)
                     self._notify("account", "reset_credit_granted",
-                                 "%s expires=%s" % (c.title or c.id,
-                                                    c.expires_at))
+                                 "%s landed=%s expires=%s" % (
+                                     c.title or c.id, landed, c.expires_at))
         self._seen_credit_ids = ids
+
+    def announcement(self) -> dict | None:
+        """External reset-announcement feed (cached ~15 min, best-effort)."""
+        if (self._announcement is not None
+                and time.monotonic() - self._announcement_at < 900):
+            return self._announcement
+        from .announcements import fetch_announcement, DEFAULT_URL
+        url = self.cfg.get("announcements", {}).get("url", DEFAULT_URL)
+        self._announcement = fetch_announcement(url)
+        self._announcement_at = time.monotonic()
+        if self._announcement.get("latest_reset"):
+            log.info("reset tracker: latest=%s landing=%s",
+                     self._announcement.get("latest_reset"),
+                     self._announcement.get("landing"))
+        return self._announcement
 
     def _maybe_consume_reset_card(self, snapshot) -> None:
         """Auto-redeem a reset credit when the weekly window is exhausted.
