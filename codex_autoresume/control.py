@@ -62,6 +62,11 @@ justify-content:center;font-size:16px;font-weight:700}
 .kv{display:flex;justify-content:space-between;font-size:13px;color:var(--dim);
 border-bottom:1px dashed var(--line);padding-bottom:5px;gap:12px}
 .kv b{color:var(--fg);font-weight:600;text-align:right}
+.kv{align-items:center}
+.kv>span:first-child{flex:none;white-space:nowrap}
+.kv>span:last-child{flex:1;min-width:0;text-align:right;white-space:normal;overflow-wrap:anywhere}
+.kv.news>span:last-child{font-size:12px}
+.chip{white-space:nowrap}
 .kv .ok{color:var(--accent)} .kv .bad{color:var(--danger)} .kv .eta{color:var(--warn)}
 button{background:var(--card2);border:1px solid var(--line);color:var(--fg);
 border-radius:10px;padding:7px 16px;font-size:13px;cursor:pointer;
@@ -137,7 +142,7 @@ pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,.4)}
  <div class="logo"><svg viewBox="0 0 64 64"><path d="M32 4 54 12v18c0 15-9.5 25.5-22 30C19.5 55.5 10 45 10 30V12Z"
  fill="none" stroke="#fff" stroke-width="5"/><path d="M21 32.5 29 40.5 43 25" fill="none"
  stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
- <div><h1>Codex 守护</h1><div class="sub" data-i18n="sub">额度重置后自动继续任务 · 仅本机</div></div>
+ <div><h1 data-i18n="title">Codex 守护</h1><div class="sub" data-i18n="sub">额度重置后自动继续任务 · 仅本机</div></div>
  <div class="hright" id="chips"></div>
  <button class="btn-mini" style="flex:none;min-width:44px" id="langBtn" onclick="toggleLang()">CN</button>
  <button class="btn-mini" style="flex:none" data-i18n="refresh" onclick="refresh();toast(L('refreshed'))">刷新</button>
@@ -154,7 +159,7 @@ pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,.4)}
 var eff=["","none","minimal","low","medium","high","xhigh"];
 var LNG="zh";try{LNG=localStorage.getItem("cglang")||"zh"}catch(e){}
 var I18N={
-zh:{sub:"额度重置后自动继续任务 · 仅本机",refresh:"刷新",loading:"加载中…",
+zh:{title:"Codex 守护",sub:"额度重置后自动继续任务 · 仅本机",refresh:"刷新",loading:"加载中…",
 w5:"5 小时窗口",wk:"周窗口",reset:"重置",status:"使用状态",limited:"额度受限",
 avail:"✓ 可正常使用",unknown:"状态未知",eta5:"5h 额度预估耗尽",etaw:"周额度预估耗尽",
 capped:"已按5h窗口上限折算",credits:"重置赠送",forecast:"预告",landed:"到账（实测）",
@@ -174,28 +179,27 @@ errHint:"。请点右上角「刷新」重试；若反复失败，启动：",
 upd:"已更新",restored:"已恢复默认指令",pauseOK:"守护已暂停",resumeOK:"守护已恢复",
 refreshed:"已刷新",
 footer:"打开方式：侧栏输入 <code>http://127.0.0.1:8765</code>（推荐，不消耗额度）· 桌面快捷方式 · 完整说明见插件 README"},
-en:{sub:"Auto-continue tasks after quota resets · local only",refresh:"Refresh",
-loading:"Loading…",w5:"5h window",wk:"Weekly",reset:"Resets",status:"Status",
-limited:"Limited",avail:"✓ Available",unknown:"Unknown",
-eta5:"5h quota exhaust ETA",etaw:"Weekly quota exhaust ETA",
-capped:"capped by 5h window",credits:"Reset credits",forecast:"Forecast",
-landed:"Landed (observed)",news:"News",pauseAll:"⏸ Pause all",
-resumeAll:"▶ Resume all",running:"Guard running",pausedC:"Paused",
-recent:"Recent threads",
-noThread:"No recent threads — open a conversation in Codex, then refresh",
-guard:"Guard",weekly:"Weekly",card:"Credit",noneC:"(none)",expirePfx:" (expires ",
-model:"Model",inherit:"Inherit",prompt:"Resume prompt",resetD:"Reset",
-lastUpd:"Updated",resumed:"resumed",times:" times",tryPfx:" (tried ",trySfx:")",
-nextChk:"next check",
-tipGuard:"On: auto-continue the task when the 5h quota resets",
-tipWeekly:"On: also continue after the weekly quota resets (while guard is on)",
-tipCard:"When weekly quota is exhausted and reset credits exist, consume one to continue",
-quotaNA:"Quota snapshot unavailable (network hiccup); guarding still works off reset times",
+en:{title:"Codex Guard",sub:"Auto-continue conversations after quota resets",
+refresh:"Refresh",loading:"Loading…",w5:"5h window",wk:"Weekly",reset:"Resets",
+status:"Usage",limited:"Limited",avail:"✓ Available",unknown:"Unknown",
+eta5:"5h quota ETA",etaw:"Weekly quota ETA",capped:"(capped by 5h window)",
+credits:"Reset credits",forecast:"Forecast",landed:"Landed (observed)",
+news:"News",pauseAll:"⏸ Pause all",resumeAll:"▶ Resume all",
+running:"Watching",pausedC:"Paused",recent:"Recent conversations",
+noThread:"No recent conversations — open one in Codex, then refresh",
+guard:"Auto-resume",weekly:"Weekly",card:"Credits",noneC:"(none)",
+expirePfx:" (expires ",model:"Model",inherit:"Inherit",prompt:"Resume prompt",
+resetD:"Reset",lastUpd:"Last",resumed:"resumed",times:"×",tryPfx:" (",
+trySfx:" tries)",nextChk:"next check",
+tipGuard:"On: automatically continue this thread when the 5h quota resets",
+tipWeekly:"On: also continue after the weekly quota resets (Auto-resume on)",
+tipCard:"When the weekly quota runs out, spend a reset credit to keep going",
+quotaNA:"Quota snapshot unavailable — resets are still tracked",
 errConn:"Cannot reach guard daemon: ",errTimeout:"request timed out (8s)",
 errFail:"connection failed",
 errHint:". Click Refresh (top-right); if it persists start: ",
-upd:"Updated",restored:"Prompt reset to default",pauseOK:"Guard paused",
-resumeOK:"Guard resumed",refreshed:"Refreshed",
+upd:"Saved",restored:"Prompt reset to default",pauseOK:"Paused all",
+resumeOK:"Resumed all",refreshed:"Refreshed",
 footer:"Open: type <code>http://127.0.0.1:8765</code> in the sidebar (recommended, no quota cost) · desktop shortcut · full docs in the plugin README"}};
 function L(k){var d=I18N[LNG]||I18N.zh;var v=d[k];
 return (v===undefined)?(I18N.zh[k]||k):v}
@@ -261,8 +265,9 @@ function annRowsFor(s){
  var e0=cand[0];
  landTxt=fmtISO(e0.at)+" · "+(e0.kind==="weekly"?L("wk"):L("card"))}
  rows+=kvRow(L("landed"),'<b class="ok">'+esc(landTxt)+"</b>");
- if(ann&&ann.status_short){rows+=kvRow(L("news"),
- '<b style="font-weight:500" title="'+esc(ann.status||"")+'">'+esc(ann.status_short)+"</b>")}
+ if(ann&&ann.status_short){rows+='<div class="kv news"><span>'+L("news")+
+ '</span><span><b style="font-weight:500" title="'+esc(ann.status||"")+'">'+
+ esc(ann.status_short)+"</b></span></div>"}
  return rows}
 function refresh(){
 return api("/api/status").then(function(s){
@@ -365,7 +370,8 @@ for(var i=0;i<els.length;i++){els[i].textContent=L(els[i].getAttribute("data-i18
 var lb=document.getElementById("langBtn");if(lb){lb.textContent=(LNG==="en")?"EN":"CN"}
 var ft=document.getElementById("foot");if(ft){ft.innerHTML=L("footer")}
 var ld=document.getElementById("ld");if(ld){ld.textContent=L("loading")}
-try{document.documentElement.lang=(LNG==="en")?"en":"zh-CN"}catch(e){}}
+try{document.documentElement.lang=(LNG==="en")?"en":"zh-CN"}catch(e){}
+try{document.title=(LNG==="en")?"Codex Guard Console":"Codex 守护控制台"}catch(e){}}
 function toggleLang(){LNG=(LNG==="zh")?"en":"zh";
 try{localStorage.setItem("cglang",LNG)}catch(e){}
 applyLang();refresh()}

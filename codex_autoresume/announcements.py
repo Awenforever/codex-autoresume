@@ -151,7 +151,7 @@ def _status_short(text: str) -> str:
     """Compact one-liner: drop localized-time notes, trim hard at 70 chars."""
     t = _LOCAL_NOTE.sub("", text or "")
     t = t.strip()
-    return t[:70] + ("…" if len(t) > 70 else "")
+    return t[:160] + ("…" if len(t) > 160 else "")
 
 
 def fetch_announcement(url: str = DEFAULT_URL,

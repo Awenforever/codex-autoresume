@@ -52,7 +52,7 @@ CLI** — anything that stores state under `~/.codex` (sqlite layout, Codex
 ## Quick start
 
 ```bash
-git clone https://github.com/<you>/codex-autoresume.git
+git clone https://github.com/Awenforever/codex-autoresume.git
 cd codex-autoresume
 
 # run from the checkout...
@@ -74,6 +74,20 @@ codex-autoresume status                  # what is tracked, next wake, quota sna
 
 From then on, any thread that dies on a usage limit (while recent enough)
 is auto-tracked and resumed when the window resets — no `watch` needed.
+
+## Plugin install (Codex app integration)
+
+```bash
+pip install .                                    # 1. python package
+codex plugin marketplace add <path-to-repo>      # 2. local marketplace
+codex plugin add codex-autoresume-guard@codex-autoresume   # 3. the plugin
+codex-autoresume install                         # 4. background daemon + panel
+```
+
+Then open the control panel in the Codex sidebar browser:
+**http://127.0.0.1:8765** (costs no quota). Once the repo is published,
+step 2 becomes `codex plugin marketplace add
+https://github.com/Awenforever/codex-autoresume` — same everything else.
 
 ## Commands
 

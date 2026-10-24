@@ -1,10 +1,10 @@
 {
   "name": "codex-autoresume-guard",
-  "version": "0.3.3",
-  "description": "Guard conversations against usage-limit stalls: auto-continue threads and goals when quota windows reset.",
+  "version": "0.3.4",
+  "description": "Control panel: http://127.0.0.1:8765 — auto-continue Codex conversations and goals after quota resets.",
   "author": {
     "name": "codex-autoresume contributors",
-    "url": "https://github.com/codex-autoresume/codex-autoresume"
+    "url": "https://github.com/Awenforever/codex-autoresume"
   },
   "license": "MIT",
   "skills": "./skills/",
@@ -20,7 +20,7 @@
   },
   "interface": {
     "displayName": "AutoResume Guard",
-    "shortDescription": "Auto-continue conversations after usage-limit resets",
+    "shortDescription": "Control panel http://127.0.0.1:8765 — auto-continue conversations after usage-limit resets",
     "category": "Developer Tools",
     "capabilities": [
       "Interactive",
@@ -29,6 +29,6 @@
     "brandColor": "#10A37F",
     "composerIcon": "./assets/composerIcon.svg",
     "logo": "./assets/logo.svg",
-    "websiteURL": "http://127.0.0.1:8765/"
+    "websiteURL": "https://github.com/Awenforever/codex-autoresume"
   }
 }
