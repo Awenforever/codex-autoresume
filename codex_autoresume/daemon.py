@@ -689,7 +689,7 @@ class Daemon:
         exec/queue message path (failures retry later instead).
         """
         from .codexenv import CodexState
-        from .ratelimits import goal_continue, RateLimitError
+        from .ratelimits import goal_continue, RateLimitError, GoalBusyError
         try:
             goals = {g["thread_id"]: g["status"]
                      for g in CodexState(self.codex_home).goals()}
@@ -721,10 +721,29 @@ class Daemon:
             t.fail_streak = 0
             t.last_kind = ""          # handed back to the goal engine
             t.next_wake_iso = None
+            getattr(self, "_goal_busy_backoff", {}).pop(thread_id, None)
             log.info("goal %s continued via thread/goal/set (status=%s, "
                      "model=%s effort=%s)", thread_id[:8], new_status,
                      decision.model, decision.reasoning_effort)
             self._notify(thread_id, "goal_continue")
+            save_state(self.state)
+            return True
+        except GoalBusyError:
+            # the app owns the thread right now (running turn or open
+            # conversation): stand down quietly. Back off exponentially so a
+            # held writer does not keep spawning app-servers every poll
+            # (each spawn can nudge the app's remote-control websocket).
+            bo = getattr(self, "_goal_busy_backoff", None)
+            if bo is None:
+                bo = self._goal_busy_backoff = {}
+            prev = bo.get(thread_id, 0)
+            wait = 300 if prev < 300 else min(1800, prev * 2)
+            bo[thread_id] = wait
+            t.last_outcome = "writer_busy"
+            t.next_wake_iso = (_now() + timedelta(seconds=wait)).isoformat()
+            log.info("goal %s has an active writer (app owns it); "
+                     "standing down, rechecking in %d min", thread_id[:8],
+                     wait // 60)
             save_state(self.state)
             return True
         except (RateLimitError, OSError) as e:

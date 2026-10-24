@@ -65,7 +65,7 @@ border-bottom:1px dashed var(--line);padding-bottom:5px;gap:12px}
 .kv{align-items:center}
 .kv>span:first-child{flex:none;white-space:nowrap}
 .kv>span:last-child{flex:1;min-width:0;text-align:right;white-space:normal;overflow-wrap:anywhere}
-.kv.news>span:last-child{font-size:12px}
+.kv.news>span:last-child{font-size:12px;text-align:left}
 .chip{white-space:nowrap}
 .kv .ok{color:var(--accent)} .kv .bad{color:var(--danger)} .kv .eta{color:var(--warn)}
 button{background:var(--card2);border:1px solid var(--line);color:var(--fg);
@@ -335,7 +335,7 @@ L("inherit")+"</option>"+modelOpts(t.model)+"</select></div>";
 rows+=(i===0?dl:"")+
 '<div class="tcard '+(t.guard?"guard":"")+'">'+
 '<div class="thead"><span class="dot"></span><span class="ttl">'+
-esc((t.title||"")||String(t.id||"").slice(0,13))+badges+"</span></div>"+
+esc((t.title||"")||String(t.id||"").slice(0,13))+"</span>"+badges+"</div>"+
 '<div class="meta">'+L("lastUpd")+" "+fmt(t.updated)+" · "+L("resumed")+" <em>"+fmt(t.resumes)+
 "</em>"+L("times")+tries+
 (t.next_wake?(" · "+L("nextChk")+" "+String(t.next_wake).replace("T"," ").slice(5,16)):"")+

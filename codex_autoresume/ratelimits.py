@@ -409,6 +409,14 @@ def consume_reset_credit(codex_bin: str, idempotency_key: str,
         client.close()
 
 
+class GoalBusyError(RateLimitError):
+    """The thread already has an active writer (app is running/holding it).
+
+    Not a failure: the guard must stand down and retry later instead of
+    counting an error or ever falling back to message injection.
+    """
+
+
 def goal_continue(codex_bin: str, thread_id: str, model: str | None = None,
                   effort: str | None = None, origin: str = "user") -> dict:
     """Resume a parked goal exactly like the app's Continue button.
@@ -435,8 +443,13 @@ def goal_continue(codex_bin: str, thread_id: str, model: str | None = None,
                 logging.getLogger("codex-autoresume").warning(
                     "thread/settings/update failed (%s); continuing goal "
                     "with existing thread settings", e)
-        result = client._rpc("thread/goal/set", {
-            "threadId": thread_id, "status": "active", "origin": origin})
-        return result
+        try:
+            result = client._rpc("thread/goal/set", {
+                "threadId": thread_id, "status": "active", "origin": origin})
+            return result
+        except RateLimitError as e:
+            if "active writer" in str(e).lower():
+                raise GoalBusyError(str(e)) from None
+            raise
     finally:
         client.close()
