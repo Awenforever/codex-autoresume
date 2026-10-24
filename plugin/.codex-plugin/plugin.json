@@ -1,6 +1,6 @@
 {
   "name": "codex-autoresume-guard",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Guard conversations against usage-limit stalls: auto-continue threads and goals when quota windows reset.",
   "author": {
     "name": "codex-autoresume contributors",

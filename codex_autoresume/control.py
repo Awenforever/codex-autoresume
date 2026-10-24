@@ -181,7 +181,9 @@ function etaRow(name,q,etaK,rateK,win,cappedK){
 function toast(m){var t=document.getElementById("toast");t.textContent=m;
 t.classList.add("show");setTimeout(function(){t.classList.remove("show")},1500)}
 function api(p,o){var init=o?{method:"POST",headers:{"Content-Type":"application/json"},
-body:JSON.stringify(o)}:undefined;return fetch(p,init).then(function(r){return r.json()})}
+body:JSON.stringify(o)}:undefined;
+var tp=new Promise(function(_,rej){setTimeout(function(){rej(new Error("timeout"))},8000)});
+return Promise.race([fetch(p,init).then(function(r){return r.json()}),tp])}
 function modelOpts(cur){var o="";var ms=(window.__s&&window.__s.models)||[];
 for(var k=0;k<ms.length;k++){o+='<option '+((cur||"")===ms[k].id?"selected":"")+' value="'+esc(ms[k].id)+'">'+esc(ms[k].name)+"</option>"}
 return o}
@@ -268,7 +270,7 @@ esc((t.title||"")||String(t.id||"").slice(0,13))+badges+"</span></div>"+
 ' onchange="setT(\''+t.id+'\',{weekly:this.checked})"><i></i></label>'+
 '<label>跨周</label></div>'+
 cardSwitch+
-'<div class="ctl"><label>模型</label><select onchange="setT(''+t.id+'',{model:this.value})"><option '+((t.model||"")===""?"selected":"")+' value="">继承</option>'+modelOpts(t.model)+"</select></div>'
+'<div class="ctl"><label>模型</label><select onchange="setT(\''+t.id+'\',{model:this.value})"><option '+((t.model||"")===""?"selected":"")+' value="">继承</option>'+modelOpts(t.model)+"</select></div>"+
 '<div class="ctl"><label>Reasoning</label><select onchange="setT(\''+t.id+
 '\',{effort:this.value})">';
 for(var j=0;j<eff.length;j++){rows+='<option '+((eff[j]===(t.effort||""))?"selected":"")+
@@ -277,9 +279,11 @@ rows+="</select></div></div>"+promptRow+"</div>";
 }
 document.getElementById("threads").innerHTML=rows||
 '<div class="card empty">暂无近期会话——在 Codex 里打开一个对话后刷新即可</div>';
-}).catch(function(){
+}).catch(function(e){
+var why=(e&&e.message==="timeout")?"请求超时（8 秒无响应）":"连接失败";
 document.getElementById("quota").innerHTML=
-'<div style="color:var(--danger);font-size:13px">守护进程未运行（连接失败）。启动：schtasks /Run /TN codex-autoresume</div>'})}
+'<div style="color:var(--danger);font-size:13px">无法连接守护进程：'+why+
+'。请点右上角「刷新」重试；若反复失败，启动：schtasks /Run /TN codex-autoresume</div>'})}
 function setT(id,o){api("/api/threads/"+id,o).then(function(){toast("已更新");refresh()})}
 function resetPrompt(id){api("/api/threads/"+id,{prompt:""}).then(function(){
 toast("已恢复默认指令");refresh()})}
