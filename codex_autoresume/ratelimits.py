@@ -221,10 +221,20 @@ class AppServerClient:
         return QuotaSnapshot.from_response(result)
 
 
-def fetch_quota_snapshot(codex_bin: str) -> QuotaSnapshot:
-    """One-shot convenience: spawn, read, shut down."""
-    client = AppServerClient(codex_bin)
-    try:
-        return client.read_rate_limits()
-    finally:
-        client.close()
+def fetch_quota_snapshot(codex_bin: str, attempts: int = 2) -> QuotaSnapshot:
+    """One-shot convenience: spawn, read, shut down (with retry).
+
+    The backend call can fail transiently (proxy/network blips); one retry
+    avoids noisy failures for one-shot CLI usage.
+    """
+    last: Exception | None = None
+    for _ in range(max(1, attempts)):
+        client = AppServerClient(codex_bin)
+        try:
+            return client.read_rate_limits()
+        except (RateLimitError, OSError) as e:
+            last = e
+            time.sleep(1.5)
+        finally:
+            client.close()
+    raise last if last else RateLimitError("unreachable")
