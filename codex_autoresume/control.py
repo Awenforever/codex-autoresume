@@ -431,6 +431,9 @@ class ControlApi:
                     self.wfile.write(body)
                 elif self.path == "/api/status":
                     self._json(api.status())
+                elif self.path == "/api/uia/probe":
+                    from .uia import find_continue_buttons
+                    self._json({"buttons": find_continue_buttons()})
                 else:
                     self._json({"error": "not found"}, 404)
 
