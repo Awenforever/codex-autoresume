@@ -173,11 +173,16 @@ def cmd_resume_now(args) -> int:
         tid = goals[0]["thread_id"]
     tc = thread_config(cfg, tid)
     settings = merge_settings(cfg, tc)
-    is_goal = any(g["thread_id"] == tid for g in CodexState(codex_home).goals())
+    cstate = CodexState(codex_home)
+    is_goal = any(g["thread_id"] == tid for g in cstate.goals())
     prompt = (settings.prompt_goal if is_goal else settings.prompt_generic) \
         if not args.prompt else args.prompt
-    model = args.model or settings.model or ""
-    effort = args.effort or settings.reasoning_effort or ""
+    # inherit the thread's recorded model/effort unless overridden (exec
+    # resume otherwise falls back to config.toml defaults)
+    info = cstate.thread(tid)
+    model = args.model or settings.model or (info.model if info else "") or ""
+    effort = (args.effort or settings.reasoning_effort
+              or (info.reasoning_effort if info else "") or "")
     codex_bin = find_codex_bin(cfg["general"]["codex_bin"])
     if settings.mode == "queue" and not args.model:
         argv = build_queue_command(codex_bin, tid, prompt)

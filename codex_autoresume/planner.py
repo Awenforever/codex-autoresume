@@ -149,14 +149,24 @@ def plan_for_thread(event: InterruptionEvent,
     wake = min(candidates) if candidates else now
 
     # --- quota gate ---------------------------------------------------------
+    # The snapshot is advisory: ordinaryUsageAllowed can lag reality. When
+    # the reset deadline has passed we attempt anyway -- a still-limited
+    # resume fails instantly, costs nothing and re-schedules itself. Only a
+    # deadline still in the future justifies waiting.
     if snapshot is not None and now >= wake:
         ok, why = snapshot.recovery_ok(
             cfg["limits_probe"]["recovery_used_percent_max"])
         if not ok:
-            recheck = now + timedelta(seconds=cfg["limits_probe"]["poll_sec"])
-            return Decision("wait", event.thread_id,
-                            "quota gate: %s" % why, wake_at=recheck,
-                            kind=event.kind)
+            deadline = event.reset_at
+            if deadline is None:
+                nxt = snapshot.next_reset_epoch()
+                if nxt:
+                    deadline = datetime.fromtimestamp(nxt).astimezone()
+            if deadline is not None and now < deadline + timedelta(seconds=grace):
+                recheck = now + timedelta(seconds=cfg["limits_probe"]["poll_sec"])
+                return Decision("wait", event.thread_id,
+                                "quota gate: %s (reset not due yet)" % why,
+                                wake_at=recheck, kind=event.kind)
 
     # --- busy guard ----------------------------------------------------------
     if busy:

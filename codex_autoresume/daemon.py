@@ -170,6 +170,14 @@ class Daemon:
             t.next_wake_iso = (decision.wake_at.isoformat()
                                if decision.wake_at else None)
             if decision.action == "due":
+                # exec resume does NOT inherit the thread's model/effort by
+                # itself (it falls back to config defaults); pass the
+                # thread's recorded settings through for fidelity
+                if decision.mode != "queue" and info is not None:
+                    if not decision.model and info.model:
+                        decision.model = info.model
+                    if not decision.reasoning_effort and info.reasoning_effort:
+                        decision.reasoning_effort = info.reasoning_effort
                 self._launch_resume(thread_id, t, decision, info)
 
         self._reap_finished_resumes()

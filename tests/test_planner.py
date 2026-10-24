@@ -68,7 +68,7 @@ class TestPlanner(unittest.TestCase):
         self.assertEqual(d.action, "wait")
         self.assertGreaterEqual(d.wake_at, self.reset)
 
-    def test_quota_gate_blocks(self):
+    def test_quota_gate_blocks_before_deadline(self):
         past = self.now - timedelta(minutes=10)
         snap = QuotaSnapshot(ordinary_usage_allowed=False,
                              primary=Window(used_percent=100,
@@ -80,6 +80,20 @@ class TestPlanner(unittest.TestCase):
                             today=self.now.strftime("%Y-%m-%d"))
         self.assertEqual(d.action, "wait")
         self.assertIn("quota gate", d.reason)
+
+    def test_quota_gate_advisory_after_deadline(self):
+        # ordinaryUsageAllowed can lag reality: once the parsed reset time
+        # has passed, attempt anyway -- a still-limited resume fails cheap
+        past = self.now - timedelta(minutes=10)
+        snap = QuotaSnapshot(ordinary_usage_allowed=False,
+                             primary=Window(used_percent=100,
+                                            resets_at=int((self.now - timedelta(minutes=5)).timestamp())))
+        d = plan_for_thread(self.event("usage_primary", past),
+                            ThreadState(tracked=True), base_cfg(), {},
+                            thread_last_update_ms=int(self.now.timestamp() * 1000),
+                            busy=False, now=self.now, snapshot=snap,
+                            today=self.now.strftime("%Y-%m-%d"))
+        self.assertEqual(d.action, "due")
 
     def test_quota_gate_allows(self):
         past = self.now - timedelta(minutes=10)
