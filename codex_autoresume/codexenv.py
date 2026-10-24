@@ -28,6 +28,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -37,6 +38,9 @@ from typing import Any
 WIN_APP_GLOBS = [
     os.path.join("~", "AppData", "Local", "OpenAI", "Codex", "bin", "*", "codex.exe"),
 ]
+
+_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+                      re.IGNORECASE)
 
 
 class CodexEnvError(Exception):
@@ -147,7 +151,12 @@ class CodexState:
 
         *since_completed_at* is a unix-seconds watermark; rows without a
         completed_at are always included (the caller dedups by turn_id).
+        Thread ids are canonicalized through :meth:`rollout_alias_map` —
+        continuation ids found in a rollout filename (``<idA>_<idB>.jsonl``)
+        map to the canonical threads-table id, so the same conversation is
+        never tracked (and resumed) twice.
         """
+        aliases = self.rollout_alias_map()
         out: list[TurnFailure] = []
         con = _connect_ro(self._history_db)
         try:
@@ -166,12 +175,33 @@ class CodexState:
                 info = str(payload.get("codexErrorInfo") or
                            payload.get("codex_error_info") or "")
                 out.append(TurnFailure(
-                    thread_id=thread_id, turn_id=turn_id,
+                    thread_id=aliases.get(thread_id, thread_id),
+                    turn_id=turn_id,
                     completed_at=completed_at, codex_error_info=info,
                     message=message))
         finally:
             con.close()
         return out
+
+    def rollout_alias_map(self) -> dict[str, str]:
+        """Map continuation thread ids to their canonical threads-table id.
+
+        Rollout filenames may chain ids (``rollout-...-<idA>_<idB>.jsonl``)
+        when a thread was forked/continued; turns are recorded under the
+        continuation id while the thread registry only knows the original.
+        """
+        con = _connect_ro(self._state_db)
+        try:
+            rows = con.execute(
+                "SELECT id, rollout_path FROM threads").fetchall()
+        finally:
+            con.close()
+        aliases: dict[str, str] = {}
+        for tid, rollout_path in rows:
+            for found in _UUID_RE.findall(rollout_path or ""):
+                if found.lower() != tid.lower():
+                    aliases[found.lower()] = tid
+        return aliases
 
     def busy_threads(self, item_fresh_sec: int = 900) -> set[str]:
         """Threads with a turn genuinely in progress.

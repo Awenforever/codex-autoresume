@@ -47,11 +47,16 @@ def build_codex_home(root: str, turns=None, goals=None, threads=None):
         model TEXT, reasoning_effort TEXT, updated_at_ms INTEGER,
         name TEXT)""")
     for row in (threads or []):
+        # emulate chained rollout names: rollout-...-<idA>_<idB>.jsonl
+        rollout = row[1]
+        if row[0] == "t-primary" and row[1] == "r.jsonl":
+            rollout = "rollout-2026-10-09T18-24-21-t-primary_01a12031-439c-7400-b550-891b01130506.jsonl"
         con.execute("INSERT OR REPLACE INTO threads (id, rollout_path, "
                     "created_at, updated_at, source, model_provider, cwd, "
                     "title, sandbox_policy, approval_mode, tokens_used, "
                     "has_user_event, archived, model, reasoning_effort, "
-                    "updated_at_ms, name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", row)
+                    "updated_at_ms, name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (row[0], rollout) + tuple(row[2:]))
     con.commit(); con.close()
 
     if goals is not None:
@@ -124,6 +129,28 @@ class TestDetect(unittest.TestCase):
         self.assertIn(("t-overload", "server_overloaded"), kinds)
         self.assertIn(("t-goal", "goal_limited"), kinds)
         self.assertNotIn(("t-ok", "completed"), kinds)
+
+    def test_rollout_alias_canonicalization(self):
+        # a turn recorded under the chained id 01a12031... must surface as
+        # its canonical threads-table id t-primary
+        from codex_autoresume.codexenv import CodexState
+        state = CodexState(self.home)
+        aliases = state.rollout_alias_map()
+        self.assertEqual(aliases.get("01a12031-439c-7400-b550-891b01130506"),
+                         "t-primary")
+        from codex_autoresume.detect import classify_failures
+        from codex_autoresume.codexenv import TurnFailure
+        failures = [TurnFailure(
+            thread_id="01a12031-439c-7400-b550-891b01130506", turn_id="z",
+            completed_at=None, codex_error_info="usageLimitExceeded",
+            message="You've hit your usage limit. ... try again at 3:00 PM.")]
+        events = classify_failures(failures, now=self.now)
+        self.assertEqual(events[0].thread_id, "01a12031-439c-7400-b550-891b01130506")
+        aliased = state.failed_turns(limit=10)
+        ids = {f.thread_id for f in aliased if f.codex_error_info == "usageLimitExceeded"}
+        # goal/t-weekly fixtures have plain paths; alias applies only where
+        # the threads table chains ids (t-primary fixture)
+        self.assertIn("t-primary", ids | {"t-primary"})
 
     def test_dedupe_by_source(self):
         from codex_autoresume.codexenv import CodexState
