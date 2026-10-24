@@ -87,7 +87,13 @@ def uninstall() -> str:
     if system == "Windows":
         subprocess.run(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"],
                        capture_output=True, text=True)
-        return "scheduled task %s removed" % TASK_NAME
+        lnk = _startup_lnk_path()
+        if lnk.exists():
+            try:
+                lnk.unlink()
+            except OSError:
+                pass
+        return "scheduled task %s (and Startup shortcut) removed" % TASK_NAME
     if system == "Darwin":
         plist = Path.home() / "Library" / "LaunchAgents" / (PLIST_ID + ".plist")
         subprocess.run(["launchctl", "unload", str(plist)], capture_output=True)
@@ -109,7 +115,11 @@ def status() -> str:
         out = subprocess.run(
             ["schtasks", "/Query", "/TN", TASK_NAME],
             capture_output=True, text=True, encoding="utf-8", errors="replace")
-        return "installed" if out.returncode == 0 else "not installed"
+        if out.returncode == 0:
+            return "installed (logon task)"
+        if _startup_lnk_path().exists():
+            return "installed (startup shortcut)"
+        return "not installed"
     if system == "Darwin":
         out = subprocess.run(["launchctl", "list", PLIST_ID],
                              capture_output=True, text=True)
@@ -156,6 +166,38 @@ def _write_launcher(state_dir: str) -> Path:
     return launcher
 
 
+def _startup_lnk_path() -> Path:
+    base = os.environ.get("APPDATA") or str(Path.home())
+    return (Path(base) / "Microsoft" / "Windows" / "Start Menu"
+            / "Programs" / "Startup" / (TASK_NAME + ".lnk"))
+
+
+def _create_startup_shortcut(target: str, args: str) -> bool:
+    """Per-user Startup-folder shortcut (works without administrator)."""
+    lnk = _startup_lnk_path()
+    try:
+        lnk.parent.mkdir(parents=True, exist_ok=True)
+        ps = ("$s=(New-Object -ComObject WScript.Shell)"
+              ".CreateShortcut('%s');$s.TargetPath='%s';"
+              "$s.Arguments='%s';$s.WorkingDirectory='%s';"
+              "$s.WindowStyle=7;$s.Save()" % (
+                  str(lnk).replace("'", "''"),
+                  target.replace("'", "''"),
+                  args.replace("'", "''"),
+                  str(lnk.parent).replace("'", "''")))
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                           capture_output=True, text=True, timeout=60)
+        return r.returncode == 0 and lnk.exists()
+    except Exception:
+        return False
+
+
+def _start_detached(argv: list[str]) -> None:
+    flags = 0x00000008 | 0x08000000      # DETACHED_PROCESS | NO_WINDOW
+    subprocess.Popen(argv, creationflags=flags, close_fds=True,
+                     cwd=str(Path.home()))
+
+
 def _install_windows(state_dir: str | None) -> str:
     sd = state_dir or os.path.join(os.path.expanduser("~"),
                                    ".codex-autoresume")
@@ -165,11 +207,20 @@ def _install_windows(state_dir: str | None) -> str:
         ["schtasks", "/Create", "/TN", TASK_NAME, "/TR", cmd,
          "/SC", "ONLOGON", "/F"],
         capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if out.returncode != 0:
-        raise RuntimeError("schtasks failed: %s%s" % (out.stdout, out.stderr))
-    subprocess.run(["schtasks", "/Run", "/TN", TASK_NAME], capture_output=True)
-    return ("scheduled task '%s' created at logon and started now "
-            "(runs: %s)" % (TASK_NAME, cmd))
+    if out.returncode == 0:
+        subprocess.run(["schtasks", "/Run", "/TN", TASK_NAME], capture_output=True)
+        return ("scheduled task '%s' created at logon and started now "
+                "(runs: %s)" % (TASK_NAME, cmd))
+    # ONLOGON tasks can require elevation on locked-down machines; fall
+    # back to a per-user Startup shortcut + start the daemon right now.
+    _start_detached([_pythonw(), launcher])
+    if _create_startup_shortcut(_pythonw(), '"%s"' % launcher):
+        return ("logon scheduled task was denied (needs admin); installed "
+                "Startup shortcut '%s' and started the daemon now (runs: %s)"
+                % (_startup_lnk_path(), cmd))
+    return ("logon task denied and Startup shortcut failed; daemon started "
+            "now only — autostart must be configured manually (runs: %s)"
+            % cmd)
 
 
 # -------------------------------------------------------------------- macos
