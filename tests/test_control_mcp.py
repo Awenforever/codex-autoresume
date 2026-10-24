@@ -36,6 +36,10 @@ class _StubDaemon:
                 tc["reasoning_effort"] = t.guard_effort
         return tc
 
+    def model_catalog(self):
+        return [{"id": "gpt-6.1-sol", "name": "GPT-6.1 Sol"},
+                {"id": "gpt-5.6-terra", "name": "GPT-5.6 Terra"}]
+
 
 class TestControlApi(unittest.TestCase):
     def setUp(self):

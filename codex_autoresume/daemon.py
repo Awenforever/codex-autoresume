@@ -46,6 +46,8 @@ class Daemon:
         self._snapshot: QuotaSnapshot | None = None
         self._snapshot_at: float = 0.0
         self._snapshot_wall: str | None = None
+        self._models: list[dict] | None = None
+        self._models_at: float = 0.0
         self._state_mtime: float = 0.0
         self._resume_pool = ThreadPoolExecutor(
             max_workers=cfg["general"]["max_concurrent_resumes"],
@@ -276,6 +278,22 @@ class Daemon:
     def _need_snapshot(self) -> bool:
         refresh = float(self.cfg["limits_probe"]["poll_sec"])
         return (time.monotonic() - self._snapshot_at) >= refresh
+
+    def model_catalog(self) -> list[dict]:
+        """Model list for the control UI (cached ~1h, best-effort)."""
+        if (self._models is not None
+                and time.monotonic() - self._models_at < 3600):
+            return self._models
+        try:
+            from .ratelimits import list_models
+            self._models = list_models(self.codex_bin)
+            self._models_at = time.monotonic()
+            log.info("model catalog refreshed: %d models", len(self._models))
+        except Exception as e:
+            log.warning("model/list unavailable: %s", e)
+            if self._models is None:
+                self._models = []
+        return self._models or []
 
     def _quota_snapshot(self, force: bool = False) -> QuotaSnapshot | None:
         """One-shot snapshot (spawn + read + close, no orphan children).

@@ -251,6 +251,25 @@ def fetch_quota_snapshot(codex_bin: str, attempts: int = 2) -> QuotaSnapshot:
     raise last if last else RateLimitError("unreachable")
 
 
+def list_models(codex_bin: str) -> list[dict]:
+    """Available models via app-server ``model/list``.
+
+    Returns [{"id", "name"}] sorted by display name, hidden models excluded.
+    """
+    client = AppServerClient(codex_bin)
+    try:
+        result = client._rpc("model/list", {"limit": 100})
+        out = []
+        for m in (result.get("data") or []):
+            if m.get("hidden"):
+                continue
+            out.append({"id": m.get("id") or "",
+                        "name": m.get("displayName") or m.get("id") or ""})
+        return sorted(out, key=lambda m: m["name"].lower())
+    finally:
+        client.close()
+
+
 def goal_continue(codex_bin: str, thread_id: str, model: str | None = None,
                   effort: str | None = None, origin: str = "user") -> dict:
     """Resume a parked goal exactly like the app's Continue button.
