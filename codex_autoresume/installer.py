@@ -27,14 +27,40 @@ def _pythonw() -> str:
     return str(exe)
 
 
+def _repo_root() -> str | None:
+    """Checkout root when running from a source tree (not site-packages)."""
+    here = Path(__file__).resolve().parent
+    root = here.parent
+    if (root / "pyproject.toml").exists() and here.name == "codex_autoresume":
+        return str(root)
+    return None
+
+
 def _daemon_cmd(state_dir: str | None = None) -> list[str]:
-    argv = [_pythonw(), "-m", "codex_autoresume", "daemon"]
+    """Argument list for the runner.
+
+    From a source checkout the task must cd into the repo (Task Scheduler
+    starts in the profile dir); installed via pip the console script is on
+    PATH and self-contained.
+    """
+    if _repo_root() is None:
+        argv = ["codex-autoresume", "daemon"]
+    else:
+        argv = [_pythonw(), "-m", "codex_autoresume", "daemon"]
     env = os.environ.get("CODEX_AUTORESUME_HOME")
     if state_dir:
         argv += ["--state-dir", state_dir]
     elif env:
         argv += ["--state-dir", env]
     return argv
+
+
+def _runner_command(argv: list[str]) -> str:
+    """Full command string for the OS runner (handles cwd for checkouts)."""
+    root = _repo_root()
+    if root and os.name == "nt":
+        return 'cmd /c "cd /d "%s" && %s"' % (root, _quote(argv))
+    return _quote(argv)
 
 
 def _quote(argv: list[str]) -> str:
@@ -92,7 +118,7 @@ def status() -> str:
 # ------------------------------------------------------------------ windows
 
 def _install_windows(state_dir: str | None) -> str:
-    cmd = _quote(_daemon_cmd(state_dir))
+    cmd = _runner_command(_daemon_cmd(state_dir))
     out = subprocess.run(
         ["schtasks", "/Create", "/TN", TASK_NAME, "/TR", cmd,
          "/SC", "ONLOGON", "/F"],
@@ -112,14 +138,18 @@ def _install_macos(state_dir: str | None) -> str:
     agents = Path.home() / "Library" / "LaunchAgents"
     agents.mkdir(parents=True, exist_ok=True)
     plist = agents / (PLIST_ID + ".plist")
-    plist.write_bytes(plistlib.dumps({
+    payload = {
         "Label": PLIST_ID,
         "ProgramArguments": argv,
         "RunAtLoad": True,
         "KeepAlive": True,
         "StandardOutPath": str(Path.home() / ".codex-autoresume" / "launchd.out"),
         "StandardErrorPath": str(Path.home() / ".codex-autoresume" / "launchd.err"),
-    }))
+    }
+    root = _repo_root()
+    if root:
+        payload["WorkingDirectory"] = root
+    plist.write_bytes(plistlib.dumps(payload))
     subprocess.run(["launchctl", "unload", str(plist)], capture_output=True)
     out = subprocess.run(["launchctl", "load", str(plist)], capture_output=True,
                          text=True)
@@ -135,6 +165,7 @@ def _install_linux(state_dir: str | None) -> str:
     unit_dir = Path.home() / ".config" / "systemd" / "user"
     unit_dir.mkdir(parents=True, exist_ok=True)
     unit = unit_dir / (TASK_NAME + ".service")
+    root = _repo_root()
     body = "\n".join([
         "[Unit]",
         "Description=codex-autoresume unattended resume watcher",
@@ -143,6 +174,7 @@ def _install_linux(state_dir: str | None) -> str:
         "ExecStart=%s" % _quote(argv),
         "Restart=always",
         "RestartSec=30",
+    ] + (["WorkingDirectory=%s" % root] if root else []) + [
         "",
         "[Install]",
         "WantedBy=default.target",
