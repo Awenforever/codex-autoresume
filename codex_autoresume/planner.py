@@ -155,14 +155,22 @@ def plan_for_thread(event: InterruptionEvent,
     grace = g["grace_after_reset_sec"]
     jitter = random.uniform(0, g["jitter_sec"])
     candidates: list[datetime] = []
-    if event.reset_at is not None:
-        candidates.append(event.reset_at + timedelta(seconds=grace + jitter))
+    quota_ok_now = False
     if snapshot is not None:
-        nxt = snapshot.next_reset_epoch()
-        if nxt:
-            candidates.append(
-                datetime.fromtimestamp(nxt).astimezone()
-                + timedelta(seconds=grace + jitter))
+        quota_ok_now, _ = snapshot.recovery_ok(
+            cfg["limits_probe"]["recovery_used_percent_max"])
+    if quota_ok_now:
+        # usage is already available: nothing to wait for
+        candidates.append(now)
+    else:
+        if event.reset_at is not None:
+            candidates.append(event.reset_at + timedelta(seconds=grace + jitter))
+        if snapshot is not None:
+            nxt = snapshot.next_reset_epoch()
+            if nxt:
+                candidates.append(
+                    datetime.fromtimestamp(nxt).astimezone()
+                    + timedelta(seconds=grace + jitter))
     wake = min(candidates) if candidates else now
 
     # --- quota gate ---------------------------------------------------------

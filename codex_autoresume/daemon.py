@@ -156,6 +156,17 @@ class Daemon:
                 t.last_reset_at = e.reset_at.isoformat()
             self._maybe_track(t, e)
 
+        # goal status is current state: a goal that is (again) parked by a
+        # limit must be (re)armed every tick, independent of event dedup
+        for gid in goal_threads:
+            t = self.state.thread(gid)
+            t.is_goal = True
+            if not t.tracked:
+                t.tracked = True
+                log.info("tracking goal thread %s (goal parked)", gid[:8])
+            if not t.last_kind:
+                t.last_kind = "goal_limited"
+
         # re-derive wake times for tracked threads every tick (config may
         # change; snapshot reset times may arrive later)
         for thread_id, t in list(self.state.threads.items()):

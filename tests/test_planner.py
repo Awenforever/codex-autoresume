@@ -59,6 +59,19 @@ class TestPlanner(unittest.TestCase):
         self.assertEqual(d.action, "due")
         self.assertIsNotNone(d.prompt)
 
+    def test_quota_available_resumes_despite_future_reset(self):
+        # usage window is fresh (allowed, low usage): resume immediately
+        # even though a parsed reset time lies in the future
+        snap = QuotaSnapshot(ordinary_usage_allowed=True,
+                             primary=Window(used_percent=3,
+                                            resets_at=int((self.now + timedelta(hours=4)).timestamp())))
+        d = plan_for_thread(self.event("usage_primary", self.reset),
+                            ThreadState(tracked=True), base_cfg(), {},
+                            thread_last_update_ms=int(self.now.timestamp() * 1000),
+                            busy=False, now=self.now, snapshot=snap,
+                            today=self.now.strftime("%Y-%m-%d"))
+        self.assertEqual(d.action, "due")
+
     def test_wait_before_reset(self):
         d = plan_for_thread(self.event("usage_primary", self.reset),
                             ThreadState(tracked=True), base_cfg(), {},
