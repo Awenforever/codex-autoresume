@@ -6,4 +6,4 @@ them headlessly via ``codex exec resume`` with per-resume model/reasoning
 overrides.
 """
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
