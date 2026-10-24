@@ -86,7 +86,7 @@ text-overflow:ellipsis;flex:1;min-width:0}
 .badge.gstat{background:#3a3320;color:var(--warn)}
 .meta{font-size:11.5px;color:var(--dim);margin:5px 0 11px 17px}
 .meta em{font-style:normal;color:#a8b3ba}
-.controls{display:flex;gap:16px;align-items:center;flex-wrap:wrap;
+.controls{display:flex;gap:11px;align-items:center;flex-wrap:nowrap;overflow-x:auto;
 padding-left:17px;border-top:1px solid var(--line);padding-top:11px}
 .ctl{display:flex;align-items:center;gap:7px;position:relative}
 .ctl label{font-size:12px;color:var(--dim)}
@@ -107,7 +107,7 @@ background:#aab4bb;top:3px;left:3px;transition:.18s}
 .sw input:checked+i{background:var(--accent);box-shadow:0 0 10px rgba(16,163,127,.4)}
 .sw input:checked+i:before{transform:translateX(18px);background:#fff}
 input[type=text]{background:var(--card2);border:1px solid var(--line);color:var(--fg);
-border-radius:9px;padding:6px 10px;font-size:12.5px;width:150px;transition:border-color .15s}
+border-radius:9px;padding:5px 8px;font-size:12px;width:126px;transition:border-color .15s}
 input[type=text]:focus{outline:none;border-color:var(--accent)}
 input::placeholder{color:#5c666d}
 select{background:var(--card2);border:1px solid var(--line);color:var(--fg);
@@ -137,7 +137,6 @@ pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,.4)}
 <div class="card"><div class="hero" id="quota">
  <div style="color:var(--dim);font-size:13px">加载中…</div>
 </div>
-<div class="hinfo" id="ann" style="display:none;margin:-6px 18px 13px"></div>
 </div>
 <div class="sect">近期会话</div>
 <div id="threads"></div>
@@ -175,20 +174,30 @@ function etaRow(name,q,etaK,rateK,win,cappedK){
  if(eta){b='<b class="eta">'+fmtDT(eta)+"</b>"}
  else if(rate){b="<b>—</b>"}
  else{b="<b>采样中</b>"}
- var tail=(rate?(' <span style="font-size:11px">（'+rate+"%/h，按近"+win+"速度）</span>"):
-   ' <span style="font-size:11px">（按近'+win+"速度）</span>");
+ var tail=(rate?(' <span style="font-size:11px">（'+rate+"%/h）</span>"):"")
  if(cappedK&&q[cappedK]){tail+=' <span style="font-size:11px;color:var(--dim)">已按5h窗口上限折算</span>'}
  return '<div class="kv"><span>'+name+"预估耗尽</span><span>"+b+tail+"</span></div>"}
 function toast(m){var t=document.getElementById("toast");t.textContent=m;
 t.classList.add("show");setTimeout(function(){t.classList.remove("show")},1500)}
 function api(p,o){var init=o?{method:"POST",headers:{"Content-Type":"application/json"},
 body:JSON.stringify(o)}:undefined;return fetch(p,init).then(function(r){return r.json()})}
+function modelOpts(cur){var o="";var ms=(window.__s&&window.__s.models)||[];
+for(var k=0;k<ms.length;k++){o+='<option '+((cur||"")===ms[k].id?"selected":"")+' value="'+esc(ms[k].id)+'">'+esc(ms[k].name)+"</option>"}
+return o}
 function esc(s){return String(s===null||s===undefined?"":s).replace(/&/g,"&amp;")
 .replace(/</g,"&lt;").replace(/"/g,"&quot;")}
 function refresh(){
 return api("/api/status").then(function(s){
 window.__s=s;
 var q=s.quota,qh="";
+var annRows="";
+var ann=s.announcement||null;
+if(ann&&ann.status){annRows+='<div class="kv"><span>官方重置动态</span><b style="font-weight:500">'+esc(ann.status)+"</b></div>"}
+if(ann&&ann.latest_reset){annRows+='<div class="kv"><span>最近全球重置</span><b>'+esc(ann.latest_reset_local||ann.latest_reset)+"</b></div>"}
+var ce=s.credit_events||[];
+if(ce&&ce.length){var lastCe=ce[ce.length-1];
+annRows+='<div class="kv"><span>重置卡实际到账</span><b class="ok">'+esc(String(lastCe.landed_at||"").replace("T"," ").slice(5,16))+" · "+esc(lastCe.title||lastCe.id)+"</b></div>"}
+
 if(!q){
 qh='<div style="flex:1;color:var(--dim);font-size:13px">额度快照暂不可用（网络波动），守护仍按重置时间正常工作</div>';
 }else{
@@ -199,25 +208,13 @@ ring(q.secondary_used,"周窗口",fmtT(q.secondary_reset))+
 (q.allowed===false?"额度受限":q.allowed===true?"✓ 可正常使用":"状态未知")+"</b></div>"+
 etaRow("5h 额度",q,"eta_primary","rate_primary","1h")+
 etaRow("周额度",q,"eta_secondary","rate_secondary","5h","eta_secondary_capped")+
-'<div class="kv"><span>重置赠送</span><b>'+fmt(q.credits)+" 个</b></div>"+
+'<div class="kv"><span>重置赠送</span><b>'+fmt((q.credits_count!==undefined)?q.credits_count:q.credits)+" 个</b></div>"+annRows+
 '<div style="margin-top:4px"><button class="btn-main" onclick="togglePause()">'+
 (s.paused?"▶ 恢复守护":"⏸ 全部暂停")+"</button></div></div>";
 }
 document.getElementById("quota").innerHTML=qh;
 var ann=s.announcement||null;
 var ce=s.credit_events||[];
-var ah="";
-if(ann&&(ann.latest_reset||ann.landing)){
-ah='<div class="kv"><span>官方重置预告</span><b style="font-weight:500">'+
-esc(ann.landing||"（暂无新预告）")+"</b></div>";
-}
-if(ce&&ce.length){
-var last=ce[ce.length-1];
-ah+='<div class="kv"><span>重置卡实际到账</span><b class="ok">'+
-esc(String(last.landed_at||"").replace("T"," ").slice(5,19))+" · "+esc(last.title||last.id)+"</b></div>";
-}
-if(ah){document.getElementById("ann").innerHTML=ah;
-document.getElementById("ann").style.display="block"}
 document.getElementById("chips").innerHTML=
 '<span class="chip '+(s.paused?"":"on")+'">'+(s.paused?"已暂停":"守护运行中")+"</span>"+
 '<span class="chip '+(s.dry_run?"dry":"on")+'">'+(s.dry_run?"DRY-RUN":"LIVE")+"</span>";
@@ -236,10 +233,15 @@ var t=ts[i];
 var badges=(t.is_goal?'<span class="badge goal">GOAL</span>':"")+
 (t.goal_status?'<span class="badge gstat">'+esc(t.goal_status)+"</span>":"");
 var tries=(t.attempts&&t.attempts>t.resumes)?"（尝试 "+t.attempts+"）":"";
+var cq0=s.quota||{};
+var cc0=(cq0.credits_count!==undefined)?cq0.credits_count:cq0.credits;
+var cInfo=(cc0?("×"+cc0):"（无）");
+if(cc0&&cq0.credits_nearest_expiry){var ed=new Date(cq0.credits_nearest_expiry*1000);
+try{cInfo+="（到期 "+ed.toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})+"）"}catch(e){}}
 var cardSwitch='<div class="ctl tip" data-tip="周额度耗尽且账户有官方重置卡时，自动消耗一张以继续任务">'+
 '<label class="sw"><input type="checkbox"'+(t.reset_card?" checked":"")+
 ' onchange="setT(\''+t.id+'\',{reset_card:this.checked})"><i></i></label>'+
-'<label>重置卡</label></div>';
+'<label>重置卡</label><span style="font-size:11px;color:var(--dim)">'+cInfo+"</span></div>";
 var promptRow="";
 if(!t.is_goal){
 promptRow='<div class="prow"><label style="font-size:12px;color:var(--dim)">继续指令</label>'+
@@ -265,8 +267,7 @@ esc((t.title||"")||String(t.id||"").slice(0,13))+badges+"</span></div>"+
 ' onchange="setT(\''+t.id+'\',{weekly:this.checked})"><i></i></label>'+
 '<label>跨周</label></div>'+
 cardSwitch+
-'<div class="ctl"><label>模型</label><input type="text" list="models" value="'+
-esc(t.model||"")+'" placeholder="继承线程" onchange="setT(\''+t.id+'\',{model:this.value})"></div>'+
+'<div class="ctl"><label>模型</label><select onchange="setT(''+t.id+'',{model:this.value})"><option '+((t.model||"")===""?"selected":"")+' value="">继承</option>'+modelOpts(t.model)+"</select></div>'
 '<div class="ctl"><label>Reasoning</label><select onchange="setT(\''+t.id+
 '\',{effort:this.value})">';
 for(var j=0;j<eff.length;j++){rows+='<option '+((eff[j]===(t.effort||""))?"selected":"")+
@@ -416,6 +417,10 @@ class ControlApi:
                 "eta_secondary": eta_s,
                 "rate_secondary": round(rate_s, 2) if rate_s else None,
                 "eta_secondary_capped": capped_s,
+                "credits_count": len(snap.reset_credits),
+                "credits_nearest_expiry": (
+                    min((c.expires_at for c in snap.reset_credits
+                         if c.expires_at), default=None) or None),
             }
         try:
             ann = d.announcement()

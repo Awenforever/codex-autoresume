@@ -1,6 +1,6 @@
 {
   "name": "codex-autoresume-guard",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Guard conversations against usage-limit stalls: auto-continue threads and goals when the 5h (and optionally weekly) quota window resets, with per-resume model/reasoning settings.",
   "author": {
     "name": "codex-autoresume contributors",
