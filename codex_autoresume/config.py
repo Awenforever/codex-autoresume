@@ -64,6 +64,9 @@ DEFAULTS: dict[str, Any] = {
         "fallback_models": [],
         "server_overloaded_retries": 3,
         "server_overloaded_cooldown_sec": 180,
+        # when true the daemon detects and plans but never invokes codex:
+        # no prompts are ever sent (safe first-deployment mode)
+        "dry_run": False,
         # auto-track any recently-active thread that hits a usage limit
         "auto_track": True,
         # only auto-track threads whose last update is within this window

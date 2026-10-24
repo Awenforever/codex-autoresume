@@ -342,6 +342,18 @@ class Daemon:
         try:
             r = self.cfg["resume"]
             prompt = decision.prompt or r["prompt_generic"]
+            if self.cfg["general"]["dry_run"]:
+                log.info("[dry-run] would resume %s (model=%s effort=%s "
+                         "mode=%s) prompt=%.80s", thread_id[:8],
+                         decision.model, decision.reasoning_effort,
+                         decision.mode, prompt)
+                t = self.state.thread(thread_id)
+                t.append_history({"at": _now().isoformat(),
+                                  "kind": "dry_run_skipped", "ok": None,
+                                  "model": decision.model})
+                t.last_outcome = "dry_run_skipped"
+                save_state(self.state)
+                return
             tried: list[str] = []
             model = decision.model
             for attempt in range(
