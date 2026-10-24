@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-autoresume"
+version = "0.1.0"
+description = "Unattended auto-continue for OpenAI Codex: resume threads and goals when the 5-hour or weekly usage-limit window resets, with per-resume model/reasoning settings."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "codex-autoresume contributors" }]
+keywords = ["codex", "openai", "rate-limit", "auto-resume", "unattended"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: No Input/Output (Daemon)",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.scripts]
+codex-autoresume = "codex_autoresume.cli:main"
+cxr = "codex_autoresume.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["codex_autoresume*"]

@@ -1,0 +1,235 @@
+"""Configuration loading and defaults.
+
+Config is a TOML file (default ``~/.codex-autoresume/config.toml``). Every key
+has a built-in default, so an empty (or missing) config file yields a working
+setup. Unknown keys are rejected with a clear error to catch typos.
+"""
+
+from __future__ import annotations
+
+import copy
+import os
+import sys
+import tomllib
+from dataclasses import dataclass, field
+from typing import Any
+
+try:  # Python >= 3.11
+    import tomllib as _toml_load_mod
+except ImportError:  # pragma: no cover
+    _toml_load_mod = None  # type: ignore[assignment]
+
+APP_DIR_NAME = ".codex-autoresume"
+
+DEFAULT_PROMPT_GOAL = (
+    "Your previous turn was interrupted because the account usage limit was "
+    "exhausted. The quota window has now reset. Continue pursuing the thread "
+    "goal from where it stopped: briefly restate current progress (1-3 "
+    "lines), then keep working until the goal is complete."
+)
+
+DEFAULT_PROMPT_GENERIC = (
+    "Your previous turn was interrupted because the account usage limit was "
+    "exhausted. The quota window has now reset. Continue the task you were "
+    "working on from the exact point of interruption. Do not restart from "
+    "scratch and do not re-ask for confirmation."
+)
+
+DEFAULTS: dict[str, Any] = {
+    "general": {
+        # master switch; when false the daemon only observes and logs
+        "enabled": True,
+        # empty -> auto-detect: `codex` on PATH, then desktop-app install dirs
+        "codex_bin": "",
+        # empty -> ~/.codex (respects CODEX_HOME)
+        "codex_home": "",
+        # empty -> ~/.codex-autoresume
+        "state_dir": "",
+        "poll_interval_sec": 30,
+        # extra wait after a parsed reset time before resuming
+        "grace_after_reset_sec": 120,
+        # random extra wait (0..N) to avoid thundering-herd on shared resets
+        "jitter_sec": 45,
+        # per-thread minimum spacing between two resume attempts
+        "min_resume_interval_sec": 300,
+        # global safety budget
+        "max_resumes_per_day": 60,
+        "max_resumes_per_thread_per_day": 12,
+        # weekly/secondary-window handling:
+        #   "off"         - never wait for weekly resets
+        #   "per-thread"  - only threads with weekly_resume=true in [threads]
+        #   "all"         - wait for weekly resets for every tracked thread
+        "weekly_resume": "off",
+        # when a resume fails with "model at capacity", rotate through these
+        "fallback_models": [],
+        "server_overloaded_retries": 3,
+        "server_overloaded_cooldown_sec": 180,
+        # auto-track any recently-active thread that hits a usage limit
+        "auto_track": True,
+        # only auto-track threads whose last update is within this window
+        "auto_track_max_age_hours": 36,
+        # optional shell command run on events; {} placeholders:
+        #   {event} {thread_id} {reason} {detail}
+        "notify_command": "",
+        # hard timeout for one resume invocation (a resumed turn may run long)
+        "resume_timeout_sec": 21600,
+        # concurrent resume invocations
+        "max_concurrent_resumes": 2,
+    },
+    "resume": {
+        # "exec"  -> codex exec resume <id> "<prompt>" (supports model overrides)
+        # "queue" -> codex queue --thread <id> --message "<prompt>" (in-app,
+        #            preserves the thread's own settings, no model override)
+        "mode": "exec",
+        # run a minimal-cost probe turn before the real resume (adds a tiny
+        # "reply OK" turn to the thread; off by default because the
+        # rate-limit snapshot gate already verifies recovery)
+        "probe_first": False,
+        "prompt_goal": DEFAULT_PROMPT_GOAL,
+        "prompt_generic": DEFAULT_PROMPT_GENERIC,
+        # empty -> inherit the thread's own model / effort
+        "model": "",
+        "reasoning_effort": "",
+        # extra -c key=value overrides applied to every exec resume
+        "extra_config": [],
+        # extra raw args appended to the codex invocation
+        "codex_extra_args": [],
+    },
+    "limits_probe": {
+        # use `codex app-server` JSON-RPC account/rateLimits/read as the
+        # recovery gate; disable to rely on parsed reset times only
+        "use_app_server": True,
+        # while a thread is waiting for its reset, refresh limits this often
+        "poll_sec": 60,
+        # fallback gate when ordinaryUsageAllowed is unavailable:
+        # resume only if primary.usedPercent is below this
+        "recovery_used_percent_max": 95,
+    },
+    # per-thread overrides, keyed by thread UUID (full or prefix):
+    # [threads."01a05ddb-0483-..."]
+    # enabled = true
+    # model = "gpt-6.1-sol"
+    # reasoning_effort = "high"
+    # prompt = "..."
+    # mode = "exec"
+    # weekly_resume = true
+    "threads": {},
+}
+
+_THREAD_KEYS = {
+    "enabled", "model", "reasoning_effort", "prompt", "mode", "weekly_resume",
+    "max_resumes_per_day",
+}
+
+
+class ConfigError(Exception):
+    pass
+
+
+def _merge(base: dict, override: dict, path: str) -> dict:
+    out = copy.deepcopy(base)
+    thread_table = path == "threads" or path.startswith("threads.")
+    for k, v in override.items():
+        if k not in out:
+            if thread_table:
+                # [threads."<uuid>"] tables accept arbitrary thread keys;
+                # they are validated against _THREAD_KEYS afterwards
+                out[k] = {}
+            else:
+                raise ConfigError("unknown config key: %s.%s" % (path, k))
+        cur = out[k]
+        if isinstance(cur, dict) and isinstance(v, dict):
+            child = (path + "." + k) if path else k
+            out[k] = _merge(cur, v, child)
+        else:
+            out[k] = copy.deepcopy(v)
+    return out
+
+
+def default_state_dir() -> str:
+    override = os.environ.get("CODEX_AUTORESUME_HOME")
+    if override:
+        return override
+    return os.path.join(os.path.expanduser("~"), APP_DIR_NAME)
+
+
+def default_config_path() -> str:
+    return os.path.join(default_state_dir(), "config.toml")
+
+
+def load_config(path: str | None = None) -> dict:
+    """Load and validate config from *path* (or the default location)."""
+    cfg = copy.deepcopy(DEFAULTS)
+    if path is None:
+        path = default_config_path()
+    if os.path.exists(path):
+        try:
+            with open(path, "rb") as f:
+                user = tomllib.load(f)
+        except tomllib.TOMLDecodeError as e:
+            raise ConfigError("failed to parse %s: %s" % (path, e)) from e
+        cfg = _merge(cfg, user, "")
+    _validate(cfg)
+    cfg["_config_path"] = os.path.abspath(path)
+    return cfg
+
+
+def _validate(cfg: dict) -> None:
+    g = cfg["general"]
+    if g["weekly_resume"] not in ("off", "per-thread", "all"):
+        raise ConfigError("general.weekly_resume must be off|per-thread|all")
+    if cfg["resume"]["mode"] not in ("exec", "queue"):
+        raise ConfigError("resume.mode must be exec|queue")
+    if g["poll_interval_sec"] < 5:
+        raise ConfigError("general.poll_interval_sec must be >= 5")
+    if g["max_concurrent_resumes"] < 1:
+        raise ConfigError("general.max_concurrent_resumes must be >= 1")
+    for tid, t in cfg["threads"].items():
+        if not isinstance(t, dict):
+            raise ConfigError("threads.%s must be a table" % tid)
+        bad = set(t) - _THREAD_KEYS
+        if bad:
+            raise ConfigError(
+                "unknown key(s) in threads.%s: %s" % (tid, ", ".join(sorted(bad)))
+            )
+        if "mode" in t and t["mode"] not in ("exec", "queue"):
+            raise ConfigError("threads.%s.mode must be exec|queue" % tid)
+
+
+def thread_config(cfg: dict, thread_id: str) -> dict:
+    """Effective per-thread settings for *thread_id* (longest UUID prefix wins)."""
+    tid = thread_id.lower()
+    match = None
+    for key in cfg["threads"]:
+        k = key.lower()
+        if tid == k or tid.startswith(k) or k.startswith(tid):
+            if match is None or len(k) > len(match):
+                match = k
+    out = {
+        "enabled": None,
+        "model": None,
+        "reasoning_effort": None,
+        "prompt": None,
+        "mode": None,
+        "weekly_resume": None,
+        "max_resumes_per_day": None,
+    }
+    if match is not None:
+        for k, v in cfg["threads"][match].items():
+            out[k] = v
+    return out
+
+
+def resolve_codex_home(cfg: dict) -> str:
+    if cfg["general"]["codex_home"]:
+        return os.path.abspath(cfg["general"]["codex_home"])
+    env = os.environ.get("CODEX_HOME")
+    if env:
+        return os.path.abspath(env)
+    return os.path.join(os.path.expanduser("~"), ".codex")
+
+
+def resolve_state_dir(cfg: dict) -> str:
+    if cfg["general"]["state_dir"]:
+        return os.path.abspath(cfg["general"]["state_dir"])
+    return default_state_dir()

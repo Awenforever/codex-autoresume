@@ -1,0 +1,75 @@
+# codex-autoresume example configuration.
+# Copy to ~/.codex-autoresume/config.toml and edit; every key is optional.
+
+[general]
+# Master switch. While false the daemon observes and logs but never resumes.
+enabled = true
+
+# Leave empty to auto-detect (PATH first, then the Windows desktop-app
+# install dirs). Set explicitly if you have several codex installations.
+# codex_bin = "C:/Users/me/AppData/Local/OpenAI/Codex/bin/<hash>/codex.exe"
+
+# Leave empty for ~/.codex (CODEX_HOME is respected).
+# codex_home = ""
+
+poll_interval_sec = 30
+grace_after_reset_sec = 120     # wait this long after a reset time
+jitter_sec = 45                 # random extra delay (avoid burst resumes)
+min_resume_interval_sec = 300   # per-thread spacing between attempts
+max_resumes_per_day = 60        # global safety budget
+max_resumes_per_thread_per_day = 12
+
+# Weekly/secondary-window policy:
+#   "off"        - only handle 5-hour window resets (default)
+#   "per-thread" - only threads with weekly_resume = true below
+#   "all"        - wait for weekly resets for every tracked thread
+weekly_resume = "off"
+
+# On "Selected model is at capacity" rotate through these before giving up.
+fallback_models = []
+server_overloaded_retries = 3
+server_overloaded_cooldown_sec = 180
+
+# Track any recently-active thread that hits a usage limit, even if you
+# never called `watch` on it.
+auto_track = true
+auto_track_max_age_hours = 36
+
+# Optional shell command fired on resume outcomes.
+# Placeholders: {event} {thread_id} {reason} {detail}
+# notify_command = 'powershell -Command "New-BurntToastNotification -Text \"{event} {thread_id}\"'
+
+resume_timeout_sec = 21600      # a resumed turn may legitimately run hours
+max_concurrent_resumes = 2
+
+[resume]
+# "exec"  -> headless `codex exec resume` (supports model/effort overrides)
+# "queue" -> `codex queue` (delivered inside the desktop app; keeps the
+#            thread's own model settings)
+mode = "exec"
+
+# Optional cheap probe turn before the real resume (adds one tiny turn).
+probe_first = false
+
+# empty model/reasoning_effort = inherit the thread's own settings
+model = ""
+reasoning_effort = ""
+extra_config = []
+codex_extra_args = []
+
+[limits_probe]
+use_app_server = true           # authoritative gate via codex app-server
+poll_sec = 60
+recovery_used_percent_max = 95  # fallback gate when allowed-flag is null
+
+# ---------------------------------------------------------------------------
+# Per-thread overrides (keyed by full or prefix thread UUID).
+#
+# [threads."01a05ddb-0483-7ea1-bf01-b298b386bff8"]
+# enabled = true
+# model = "gpt-6.1-sol"          # model for every auto-resume of this thread
+# reasoning_effort = "high"
+# mode = "exec"
+# weekly_resume = true           # also resume after weekly-limit resets
+# max_resumes_per_day = 6
+# prompt = "Continue the Hermes Alive goal from where it stopped."
