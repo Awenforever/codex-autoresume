@@ -23,8 +23,16 @@ DEFAULT_URL = "https://opentherank.com/codex-reset"
 UA = "codex-autoresume/0.2 (+https://github.com/codex-autoresume)"
 
 _LATEST_RE = re.compile(
-    r"Latest recorded reset:\s*([^<]{5,120}?)(?:<|\s{2,}|$)", re.IGNORECASE)
-_LANDING_RE = re.compile(r"Landing[^<>.]{5,140}", re.IGNORECASE)
+    r"Latest recorded reset:\s*((?:[^<]|<[^>]+>){5,300}?)\bReset\b",
+    re.IGNORECASE)
+_LANDING_RE = re.compile(
+    r"Landing\s+(?:tomorrow|today|next\s+[a-z]+)?\s*"
+    r"(?:before|at|around|by)\s*[^<>()!?.]{3,60}", re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_tags(s: str) -> str:
+    return _TAG_RE.sub("", s).replace("&amp;", "&").strip()
 
 
 def fetch_announcement(url: str = DEFAULT_URL,
@@ -39,10 +47,10 @@ def fetch_announcement(url: str = DEFAULT_URL,
             html = resp.read(400_000).decode("utf-8", errors="replace")
         m = _LATEST_RE.search(html)
         if m:
-            out["latest_reset"] = m.group(1).strip()
+            out["latest_reset"] = _strip_tags(m.group(1))[:160]
         m = _LANDING_RE.search(html)
         if m:
-            out["landing"] = m.group(0).strip()
+            out["landing"] = _strip_tags(m.group(0))[:160]
         out["fetched_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     except Exception:
         pass
