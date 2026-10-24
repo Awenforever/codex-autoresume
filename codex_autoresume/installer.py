@@ -121,8 +121,46 @@ def status() -> str:
 
 # ------------------------------------------------------------------ windows
 
+def _launcher_path(state_dir: str) -> Path:
+    """Tiny bootstrap script in the state dir.
+
+    Task Scheduler's /TR argument is capped at 261 characters; pointing the
+    task at this file keeps the command short while still importing the
+    package from the source checkout.
+    """
+    return Path(state_dir) / "daemon_launcher.py"
+
+
+def _write_launcher(state_dir: str) -> Path:
+    root = _repo_root()
+    launcher = _launcher_path(state_dir)
+    argv_extra = ""
+    if os.path.abspath(state_dir) != os.path.abspath(
+            os.path.join(os.path.expanduser("~"), ".codex-autoresume")):
+        argv_extra = "\nsys.argv += ['--state-dir', %r]" % state_dir
+    if root is None:
+        body = ("from codex_autoresume.cli import main\n"
+                "import sys\n"
+                "sys.argv = ['codex-autoresume', 'daemon']\n"
+                "%s\n"
+                "raise SystemExit(main())\n" % argv_extra)
+    else:
+        body = ("import sys\n"
+                "sys.path.insert(0, %r)\n"
+                "from codex_autoresume.cli import main\n"
+                "sys.argv = ['codex-autoresume', 'daemon']\n"
+                "%s\n"
+                "raise SystemExit(main())\n" % (root, argv_extra))
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text(body, encoding="utf-8")
+    return launcher
+
+
 def _install_windows(state_dir: str | None) -> str:
-    cmd = _runner_command(_daemon_cmd(state_dir))
+    sd = state_dir or os.path.join(os.path.expanduser("~"),
+                                   ".codex-autoresume")
+    launcher = _write_launcher(sd)
+    cmd = '"%s" "%s"' % (_pythonw(), launcher)
     out = subprocess.run(
         ["schtasks", "/Create", "/TN", TASK_NAME, "/TR", cmd,
          "/SC", "ONLOGON", "/F"],
