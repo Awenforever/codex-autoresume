@@ -14,6 +14,11 @@ from .ratelimits import QuotaSnapshot
 from .state import ThreadState
 
 MAX_ATTEMPTS_BEFORE_PARK = 6
+# When the quota gate says "not recovered" but the reset deadline is closer
+# than this, attempt anyway (snapshot flags lag reality; a still-limited
+# resume fails instantly and reschedules itself). Farther out, wait quietly
+# so threads do not accumulate junk failed turns.
+GATE_ATTEMPT_WINDOW = timedelta(hours=1)
 
 
 @dataclass
@@ -149,23 +154,29 @@ def plan_for_thread(event: InterruptionEvent,
     wake = min(candidates) if candidates else now
 
     # --- quota gate ---------------------------------------------------------
-    # The snapshot is advisory: ordinaryUsageAllowed can lag reality. When
-    # the reset deadline has passed we attempt anyway -- a still-limited
-    # resume fails instantly, costs nothing and re-schedules itself. Only a
-    # deadline still in the future justifies waiting.
+    # The snapshot is advisory: ordinaryUsageAllowed / usedPercent can lag
+    # reality. When the reset deadline is near (or passed) we attempt
+    # anyway -- a still-limited resume fails instantly, costs nothing and
+    # re-schedules itself. A deadline far in the future means quiet waiting.
     if snapshot is not None and now >= wake:
         ok, why = snapshot.recovery_ok(
             cfg["limits_probe"]["recovery_used_percent_max"])
         if not ok:
             deadline = event.reset_at
-            if deadline is None:
+            if deadline is not None:
+                snap_reset = snapshot.next_reset_epoch()
+                if snap_reset:
+                    snap_dt = datetime.fromtimestamp(snap_reset).astimezone()
+                    deadline = max(deadline, snap_dt)
+            else:
                 nxt = snapshot.next_reset_epoch()
-                if nxt:
-                    deadline = datetime.fromtimestamp(nxt).astimezone()
-            if deadline is not None and now < deadline + timedelta(seconds=grace):
+                deadline = (datetime.fromtimestamp(nxt).astimezone()
+                            if nxt else None)
+            if deadline is not None and deadline - now > GATE_ATTEMPT_WINDOW:
                 recheck = now + timedelta(seconds=cfg["limits_probe"]["poll_sec"])
                 return Decision("wait", event.thread_id,
-                                "quota gate: %s (reset not due yet)" % why,
+                                "quota gate: %s (reset %s away)" % (
+                                    why, deadline.isoformat()),
                                 wake_at=recheck, kind=event.kind)
 
     # --- busy guard ----------------------------------------------------------

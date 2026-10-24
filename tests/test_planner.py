@@ -68,7 +68,9 @@ class TestPlanner(unittest.TestCase):
         self.assertEqual(d.action, "wait")
         self.assertGreaterEqual(d.wake_at, self.reset)
 
-    def test_quota_gate_blocks_before_deadline(self):
+    def test_quota_gate_waits_when_deadline_far(self):
+        # message reset passed, but snapshot shows the CURRENT window's
+        # reset 2h away and usage still capped -> wait quietly, no attempt
         past = self.now - timedelta(minutes=10)
         snap = QuotaSnapshot(ordinary_usage_allowed=False,
                              primary=Window(used_percent=100,
@@ -80,6 +82,19 @@ class TestPlanner(unittest.TestCase):
                             today=self.now.strftime("%Y-%m-%d"))
         self.assertEqual(d.action, "wait")
         self.assertIn("quota gate", d.reason)
+
+    def test_quota_gate_attempts_when_deadline_near(self):
+        # deadline inside the attempt window -> try even if the flag lags
+        past = self.now - timedelta(minutes=10)
+        snap = QuotaSnapshot(ordinary_usage_allowed=False,
+                             primary=Window(used_percent=100,
+                                            resets_at=int((self.now + timedelta(minutes=20)).timestamp())))
+        d = plan_for_thread(self.event("usage_primary", past),
+                            ThreadState(tracked=True), base_cfg(), {},
+                            thread_last_update_ms=int(self.now.timestamp() * 1000),
+                            busy=False, now=self.now, snapshot=snap,
+                            today=self.now.strftime("%Y-%m-%d"))
+        self.assertEqual(d.action, "due")
 
     def test_quota_gate_advisory_after_deadline(self):
         # ordinaryUsageAllowed can lag reality: once the parsed reset time
