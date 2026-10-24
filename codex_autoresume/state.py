@@ -98,8 +98,9 @@ def load_state(state_path: str) -> WatcherState:
             for tid, t in raw.get("threads", {}).items():
                 ts = ThreadState(**{k: v for k, v in t.items()
                                     if k in ThreadState.__dataclass_fields__})
-                if "success_resumes" not in t:
-                    # migrate older state: derive successes from history
+                if not ts.success_resumes:
+                    # migrate older state (no counter yet): derive successes
+                    # from the recorded history
                     ts.success_resumes = sum(
                         1 for h in ts.history if h.get("ok") is True)
                 st.threads[tid] = ts
