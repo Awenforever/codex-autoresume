@@ -39,14 +39,22 @@ def _repo_root() -> str | None:
 def _daemon_cmd(state_dir: str | None = None) -> list[str]:
     """Argument list for the runner.
 
-    From a source checkout the task must cd into the repo (Task Scheduler
-    starts in the profile dir); installed via pip the console script is on
-    PATH and self-contained.
+    From a source checkout the runner must import the package from the repo
+    without relying on the working directory (Task Scheduler starts in the
+    profile dir). A ``python -c`` bootstrap keeps it a SINGLE process so
+    that `schtasks /End` / service stop kills the actual daemon instead of
+    leaving an orphan behind a ``cmd`` wrapper. Installed via pip, the
+    console script is self-contained.
     """
-    if _repo_root() is None:
+    root = _repo_root()
+    if root is None:
         argv = ["codex-autoresume", "daemon"]
     else:
-        argv = [_pythonw(), "-m", "codex_autoresume", "daemon"]
+        code = ("import sys; sys.path.insert(0, %r); "
+                "from codex_autoresume.cli import main; "
+                "sys.argv = ['codex-autoresume', 'daemon']; "
+                "raise SystemExit(main())") % root
+        argv = [_pythonw(), "-c", code]
     env = os.environ.get("CODEX_AUTORESUME_HOME")
     if state_dir:
         argv += ["--state-dir", state_dir]
@@ -56,10 +64,6 @@ def _daemon_cmd(state_dir: str | None = None) -> list[str]:
 
 
 def _runner_command(argv: list[str]) -> str:
-    """Full command string for the OS runner (handles cwd for checkouts)."""
-    root = _repo_root()
-    if root and os.name == "nt":
-        return 'cmd /c "cd /d "%s" && %s"' % (root, _quote(argv))
     return _quote(argv)
 
 

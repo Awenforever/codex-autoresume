@@ -80,6 +80,81 @@ def _tail(text: str, n: int = 2000) -> str:
     return text[-n:].strip() if text else ""
 
 
+# --------------------------------------------------------------------------
+# Windows job object: children (codex exec resume) die with this process.
+# Prevents orphaned codex processes from continuing to operate threads after
+# the daemon is killed (Task Scheduler /End, logoff).
+# --------------------------------------------------------------------------
+
+_job_handle = None
+
+
+def _ensure_job():
+    global _job_handle
+    if _job_handle is not None or os.name != "nt":
+        return _job_handle
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class IO_COUNTERS(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_uint64) for n in (
+                "ReadOperationCount", "WriteOperationCount",
+                "OtherOperationCount", "ReadTransferCount",
+                "WriteTransferCount", "OtherTransferCount")]
+
+        class BASIC_LIMITS(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit", ctypes.c_int64),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_void_p),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD)]
+
+        class EXTENDED_LIMITS(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", BASIC_LIMITS),
+                ("IoInfo", IO_COUNTERS),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        k32 = ctypes.windll.kernel32
+        h = k32.CreateJobObjectW(None, None)
+        info = EXTENDED_LIMITS()
+        info.BasicLimitInformation.LimitFlags = 0x2000  # KILL_ON_JOB_CLOSE
+        if not k32.SetInformationJobObject(
+                ctypes.c_void_p(h), 9, ctypes.byref(info),
+                ctypes.sizeof(info)):
+            raise OSError("SetInformationJobObject failed")
+        _job_handle = h
+    except Exception:
+        _job_handle = None
+    return _job_handle
+
+
+def _assign_job(pid: int) -> None:
+    h = _ensure_job()
+    if h is None:
+        return
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        PROCESS_SET_QUOTA = 0x0100
+        PROCESS_TERMINATE = 0x0001
+        hp = k32.OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, False, pid)
+        if hp:
+            k32.AssignProcessToJobObject(ctypes.c_void_p(h), ctypes.c_void_p(hp))
+            k32.CloseHandle(hp)
+    except Exception:
+        pass
+
+
 def classify_output(exit_code: int, stdout: str, stderr: str) -> ResumeOutcome:
     """Classify a finished codex invocation from exit code + output text."""
     blob = "\n".join((stdout, stderr))
@@ -127,15 +202,24 @@ def run_command(argv: list[str], timeout: float = 21600.0,
         merged_env = dict(os.environ)
         merged_env.update(env)
     try:
-        proc = subprocess.run(
-            argv, capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=timeout, env=merged_env,
+        proc = subprocess.Popen(
+            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", env=merged_env,
             creationflags=CREATE_NO_WINDOW)
-        outcome = classify_output(proc.returncode, proc.stdout, proc.stderr)
-    except subprocess.TimeoutExpired as e:
-        outcome = ResumeOutcome(ok=False, kind="timeout", exit_code=None,
-                                stdout_tail=_tail(str(e.stdout or "")),
-                                stderr_tail=_tail(str(e.stderr or "")))
+        if os.name == "nt":
+            _assign_job(proc.pid)
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+            outcome = classify_output(proc.returncode, stdout or "", stderr or "")
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                stdout, stderr = proc.communicate(timeout=10)
+            except Exception:
+                stdout = stderr = ""
+            outcome = ResumeOutcome(ok=False, kind="timeout", exit_code=None,
+                                    stdout_tail=_tail(stdout or ""),
+                                    stderr_tail=_tail(stderr or ""))
     except OSError as e:
         outcome = ResumeOutcome(ok=False, kind="spawn_error", exit_code=None,
                                 stderr_tail=str(e))
