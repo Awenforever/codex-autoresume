@@ -173,12 +173,31 @@ class CodexState:
             con.close()
         return out
 
-    def busy_threads(self) -> set[str]:
-        """Threads with a turn currently in progress."""
+    def busy_threads(self, item_fresh_sec: int = 900) -> set[str]:
+        """Threads with a turn genuinely in progress.
+
+        Crashed/restarted sessions leave zombie ``inProgress`` rows behind,
+        so a live turn additionally requires recent thread activity: a new
+        thread_item written within *item_fresh_sec*. Threads whose turn only
+        started recently (no items yet) also count as busy.
+        """
+        import time as _time
         con = _connect_ro(self._history_db)
         try:
-            return {t for (t,) in con.execute(
-                "SELECT DISTINCT thread_id FROM thread_turns WHERE status = 'inProgress'")}
+            now_ms = _time.time() * 1000
+            rows = con.execute(
+                "SELECT t.thread_id, t.started_at, "
+                "(SELECT MAX(i.created_at_ms) FROM thread_items i "
+                " WHERE i.thread_id = t.thread_id) AS last_item_ms "
+                "FROM thread_turns t WHERE t.status = 'inProgress'")
+            busy: set[str] = set()
+            for thread_id, started_at, last_item_ms in rows:
+                if last_item_ms:
+                    if now_ms - last_item_ms <= item_fresh_sec * 1000:
+                        busy.add(thread_id)
+                elif started_at and now_ms - started_at * 1000 <= 4 * 3600 * 1000:
+                    busy.add(thread_id)
+            return busy
         finally:
             con.close()
 

@@ -25,6 +25,14 @@ def build_codex_home(root: str, turns=None, goals=None, threads=None):
                     "rollout_ordinal, status, error_json, started_at, completed_at) "
                     "VALUES (?,?,?,?,?,?,?)",
                     (row[0], row[1], 0, row[2], row[3], row[4], row[5]))
+    con.commit()
+    con.execute("""CREATE TABLE IF NOT EXISTS thread_items (
+        thread_id TEXT NOT NULL, turn_id TEXT NOT NULL, item_id TEXT NOT NULL,
+        rollout_ordinal INTEGER NOT NULL, created_at_ms INTEGER NOT NULL,
+        item_json TEXT NOT NULL, item_type TEXT NOT NULL DEFAULT '',
+        updated_at_ordinal INTEGER NOT NULL DEFAULT 0,
+        started_at_ms INTEGER, completed_at_ms INTEGER,
+        PRIMARY KEY (thread_id, turn_id, item_id))""")
     con.commit(); con.close()
 
     state = os.path.join(home, "state_1.sqlite")
@@ -75,6 +83,7 @@ class TestDetect(unittest.TestCase):
         self.now = datetime.now().astimezone()
         soon = (self.now + timedelta(hours=1)).strftime("%I:%M %p")
         weekly = (self.now + timedelta(days=3)).strftime("%b %d, %Y %I:%M %p")
+        started_recent = int(time.time()) - 60
         turns = [
             ("t-primary", "turn-1", "failed",
              err_payload("usageLimitExceeded",
@@ -88,7 +97,8 @@ class TestDetect(unittest.TestCase):
              err_payload("serverOverloaded", "Selected model is at capacity."),
              NOW_S, NOW_S + 2),
             ("t-ok", "turn-4", "completed", None, NOW_S, NOW_S + 3),
-            ("t-busy", "turn-5", "inProgress", None, NOW_S, None),
+            ("t-busy", "turn-5", "inProgress", None, started_recent, None),
+            ("t-zombie", "turn-6", "inProgress", None, NOW_S - 999999, None),
         ]
         threads = [
             ("t-primary", "r.jsonl", 1, 1, "user", "openai", "/w", "title",
@@ -139,7 +149,6 @@ class TestDetect(unittest.TestCase):
         from codex_autoresume.codexenv import CodexState
         state = CodexState(self.home)
         self.assertEqual(state.busy_threads(), {"t-busy"})
-
     def test_thread_lookup(self):
         from codex_autoresume.codexenv import CodexState
         state = CodexState(self.home)
