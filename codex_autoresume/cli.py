@@ -216,7 +216,11 @@ def cmd_goals(args) -> int:
 def cmd_limits(args) -> int:
     cfg = _load(args)
     from .ratelimits import fetch_quota_snapshot
-    snap = fetch_quota_snapshot(find_codex_bin(cfg["general"]["codex_bin"]))
+    try:
+        snap = fetch_quota_snapshot(find_codex_bin(cfg["general"]["codex_bin"]))
+    except Exception as e:
+        print("quota snapshot unavailable: %s" % e, file=sys.stderr)
+        return 1
     print(json.dumps({
         "ordinaryUsageAllowed": snap.ordinary_usage_allowed,
         "primary": {"usedPercent": snap.primary.used_percent,
