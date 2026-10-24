@@ -108,6 +108,8 @@ class TestDaemonDryRun(unittest.TestCase):
                 jitter_sec = 0
                 [limits_probe]
                 use_app_server = true
+                [announcements]
+                enabled = false
             """ % (self.fake_codex.replace("\\", "\\\\"),
                    self.home.replace("\\", "\\\\"),
                    self.state_dir.replace("\\", "\\\\"))))

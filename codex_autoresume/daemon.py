@@ -54,6 +54,7 @@ class Daemon:
         self._notified_credits = False
         self._announcement: dict | None = None
         self._announcement_at: float = 0.0
+        self._last_spawn_fallback: float = 0.0
         self._state_mtime: float = 0.0
         self._resume_pool = ThreadPoolExecutor(
             max_workers=cfg["general"]["max_concurrent_resumes"],
@@ -230,6 +231,11 @@ class Daemon:
                         decision.reasoning_effort = info.reasoning_effort
                 self._launch_resume(thread_id, t, decision, info)
 
+        # warm slow external caches off the HTTP path: /api/status serves
+        # cache-only, so the panel can never hang on external fetches
+        self.model_catalog()
+        self.announcement()
+
         self._reap_finished_resumes()
 
     def _maybe_track(self, t, e) -> None:
@@ -286,20 +292,39 @@ class Daemon:
         refresh = float(self.cfg["limits_probe"]["poll_sec"])
         return (time.monotonic() - self._snapshot_at) >= refresh
 
+    def cached_models(self) -> list[dict]:
+        """Cache-only read for HTTP handlers (never spawns)."""
+        return self._models or []
+
+    def cached_announcement(self) -> dict | None:
+        """Cache-only read for HTTP handlers (never fetches)."""
+        return self._announcement
+
     def model_catalog(self) -> list[dict]:
-        """Model list for the control UI (cached ~1h, best-effort)."""
+        """Model list for the control UI.
+
+        Primary source is the app-maintained models_cache.json (zero
+        network, no app-server spawn); the app-server path is only a
+        fallback when that file is missing. Refreshed ~10 min in the tick.
+        """
         if (self._models is not None
-                and time.monotonic() - self._models_at < 3600):
+                and time.monotonic() - self._models_at < 600):
             return self._models
-        try:
-            from .ratelimits import list_models
-            self._models = list_models(self.codex_bin)
+        from .ratelimits import models_from_cache, list_models
+        cached = models_from_cache(self.codex_home)
+        if cached:
+            self._models = cached
             self._models_at = time.monotonic()
-            log.info("model catalog refreshed: %d models", len(self._models))
-        except Exception as e:
-            log.warning("model/list unavailable: %s", e)
-            if self._models is None:
-                self._models = []
+        else:
+            try:
+                self._models = list_models(self.codex_bin)
+                self._models_at = time.monotonic()
+                log.info("model catalog via app-server: %d models",
+                         len(self._models))
+            except Exception as e:
+                log.warning("model/list unavailable: %s", e)
+                if self._models is None:
+                    self._models = []
         return self._models or []
 
     def _watch_reset_credits(self) -> None:
@@ -337,7 +362,10 @@ class Daemon:
                 and time.monotonic() - self._announcement_at < 900):
             return self._announcement
         from .announcements import fetch_announcement, DEFAULT_URL
-        url = self.cfg.get("announcements", {}).get("url", DEFAULT_URL)
+        acfg = self.cfg.get("announcements", {}) or {}
+        if acfg.get("enabled") is False:
+            return None
+        url = acfg.get("url", DEFAULT_URL)
         self._announcement = fetch_announcement(url)
         self._announcement_at = time.monotonic()
         if self._announcement.get("latest_reset"):
@@ -398,21 +426,45 @@ class Daemon:
             log.warning("reset credit consumption failed: %s", e)
 
     def _quota_snapshot(self, force: bool = False) -> QuotaSnapshot | None:
-        """One-shot snapshot (spawn + read + close, no orphan children).
+        """Quota snapshot with NO app-server spawns in the normal path.
 
-        A persistent app-server child would survive a hard kill of the
-        daemon (Task Scheduler /End) and linger as an orphan.
+        Direct backend HTTP (wham/usage with the auth.json token) is the
+        primary source: spawning ``codex app-server`` per poll made every
+        child fight the desktop app's remote-control websocket (the app
+        showed constant "reconnecting to network"). The app-server path is
+        kept only as a rare fallback (at most once per 15 minutes).
         """
         if not self.cfg["limits_probe"]["use_app_server"]:
             return None
         if not force and self._snapshot and \
                 (time.monotonic() - self._snapshot_at) < self.cfg["limits_probe"]["poll_sec"]:
             return self._snapshot
+        from .ratelimits import fetch_quota_http, fetch_quota_snapshot
         try:
-            from .ratelimits import fetch_quota_snapshot
-            self._snapshot = fetch_quota_snapshot(self.codex_bin, attempts=2)
+            self._snapshot = fetch_quota_http(self.codex_home)
             self._snapshot_at = time.monotonic()
             self._snapshot_wall = _now().isoformat(timespec="seconds")
+            self._last_spawn_fallback = 0.0     # http healthy again
+        except RateLimitError as e:
+            now_mono = time.monotonic()
+            last = getattr(self, "_last_spawn_fallback", 0.0)
+            if now_mono - last >= 900:
+                # rare fallback; guarded so it cannot fight the app's
+                # websocket on a regular cadence
+                self._last_spawn_fallback = now_mono
+                try:
+                    self._snapshot = fetch_quota_snapshot(self.codex_bin,
+                                                          attempts=1)
+                    self._snapshot_at = time.monotonic()
+                    self._snapshot_wall = _now().isoformat(timespec="seconds")
+                    log.warning("quota http failed (%s); app-server fallback "
+                                "used (throttled to 1/15min)", e)
+                except (RateLimitError, OSError) as e2:
+                    log.warning("quota snapshot unavailable (http: %s; "
+                                "fallback: %s)", e, e2)
+            else:
+                log.warning("quota snapshot unavailable (http: %s)", e)
+        if self._snapshot is not None:
             from .usage import add_sample
             self._usage_samples = add_sample(
                 self._usage_samples,
@@ -420,11 +472,11 @@ class Daemon:
                 self._snapshot.secondary.used_percent)
             self._watch_reset_credits()
             p, s = self._snapshot.primary, self._snapshot.secondary
-            log.info("quota snapshot: ordinaryUsageAllowed=%s primary=%s%% "
-                     "secondary=%s%% credits=%d", self._snapshot.ordinary_usage_allowed,
-                     p.used_percent, s.used_percent, len(self._snapshot.reset_credits))
-        except (RateLimitError, OSError) as e:
-            log.warning("quota snapshot unavailable: %s", e)
+            log.info("quota snapshot: allowed=%s primary=%s%% "
+                     "secondary=%s%% credits=%d",
+                     self._snapshot.ordinary_usage_allowed,
+                     p.used_percent, s.used_percent,
+                     len(self._snapshot.reset_credits))
         return self._snapshot
 
     def _effective_thread_config(self, thread_id: str, t) -> dict:

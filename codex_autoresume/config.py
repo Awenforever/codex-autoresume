@@ -119,6 +119,12 @@ DEFAULTS: dict[str, Any] = {
         "host": "127.0.0.1",
         "port": 8765,
     },
+    # external reset-announcement tracker (Tibo reset feed); fetched by the
+    # daemon in the background, never from HTTP handlers
+    "announcements": {
+        "enabled": True,
+        # "url": "https://opentherank.com/codex-reset"
+    },
     # per-thread overrides, keyed by thread UUID (full or prefix):
     # [threads."01a05ddb-0483-..."]
     # enabled = true

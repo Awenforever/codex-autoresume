@@ -422,15 +422,12 @@ class ControlApi:
                     min((c.expires_at for c in snap.reset_credits
                          if c.expires_at), default=None) or None),
             }
-        try:
-            ann = d.announcement()
-        except Exception:
-            ann = None
+        ann = d.cached_announcement()
         return {
             "paused": bool(st and st.paused),
             "dry_run": bool(d.cfg["general"]["dry_run"]),
             "quota": quota,
-            "models": d.model_catalog(),
+            "models": d.cached_models(),
             "default_prompt": d.cfg["resume"]["prompt_generic"],
             "announcement": ann,
             "credit_events": list((st.credit_events if st else []))[-5:],

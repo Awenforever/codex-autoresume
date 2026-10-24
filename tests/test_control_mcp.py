@@ -43,7 +43,14 @@ class _StubDaemon:
 
     def announcement(self):
         return {"url": "https://example.com", "latest_reset": None,
-                "landing": None, "fetched_at": None}
+                "latest_reset_local": None, "status": None,
+                "status_kind": None, "landing": None, "fetched_at": None}
+
+    def cached_models(self):
+        return self.model_catalog()
+
+    def cached_announcement(self):
+        return self.announcement()
 
 
 class TestControlApi(unittest.TestCase):

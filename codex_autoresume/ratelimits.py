@@ -29,6 +29,8 @@ import json
 import os
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
@@ -249,6 +251,124 @@ def fetch_quota_snapshot(codex_bin: str, attempts: int = 2) -> QuotaSnapshot:
         finally:
             client.close()
     raise last if last else RateLimitError("unreachable")
+
+
+WHAM_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+WHAM_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
+
+
+def fetch_quota_http(codex_home: str, timeout: float = 20) -> QuotaSnapshot:
+    """Quota snapshot via direct backend HTTP (NO app-server spawn).
+
+    Spawning ``codex app-server`` per poll makes each child connect to the
+    remote-control websocket with the machine's installation id, which can
+    fight the desktop app's own connection (visible as "reconnecting to
+    network" in the app). This path reads ``auth.json`` (fresh, read-only)
+    and calls the usage endpoints directly instead.
+    """
+    import json as _json
+    import urllib.request as _rq
+    auth_path = os.path.join(codex_home, "auth.json")
+    try:
+        with open(auth_path, encoding="utf-8") as f:
+            auth = _json.load(f)
+        tokens = auth.get("tokens") or {}
+        token = tokens.get("access_token")
+        account = tokens.get("account_id")
+    except (OSError, ValueError) as e:
+        raise RateLimitError("auth.json unreadable: %s" % e)
+    if not token:
+        raise RateLimitError("auth.json has no access_token (logged out?)")
+
+    headers = {"Authorization": "Bearer " + token,
+               "User-Agent": "codex-autoresume/0.3",
+               "Accept": "application/json"}
+    if account:
+        headers["chatgpt-account-id"] = account
+
+    def _get(url: str):
+        req = _rq.Request(url, headers=headers)
+        with _rq.urlopen(req, timeout=timeout) as resp:
+            return _json.loads(resp.read().decode("utf-8", "replace"))
+
+    try:
+        body = _get(WHAM_USAGE_URL)
+    except urllib.error.HTTPError as e:
+        raise RateLimitError("wham/usage HTTP %d" % e.code)
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise RateLimitError("wham/usage unreachable: %s" % e)
+
+    rl = body.get("rate_limit") or {}
+    def _win(d: dict) -> Window:
+        d = d or {}
+        return Window(
+            used_percent=(int(d["used_percent"])
+                          if d.get("used_percent") is not None else None),
+            resets_at=(int(d["reset_at"]) if d.get("reset_at") is not None
+                       else None),
+            window_duration_mins=(int(d["limit_window_seconds"] // 60)
+                                  if d.get("limit_window_seconds") else None),
+        )
+    snap = QuotaSnapshot(
+        ordinary_usage_allowed=bool(rl.get("allowed")) and
+        not bool(rl.get("limit_reached")),
+        primary=_win(rl.get("primary_window")),
+        secondary=_win(rl.get("secondary_window")),
+        plan_type=body.get("plan_type"),
+    )
+    # reset credits (best-effort separate endpoint)
+    try:
+        credits = _get(WHAM_CREDITS_URL)
+        items = None
+        if isinstance(credits, dict):
+            items = (credits.get("credits") or credits.get("data")
+                     or credits.get("items"))
+            if items is None and credits.get("available_count") == 0:
+                items = []
+        elif isinstance(credits, list):
+            items = credits
+        for c in (items or []):
+            if not isinstance(c, dict):
+                continue
+            snap.reset_credits.append(ResetCredit(
+                id=str(c.get("id") or c.get("credit_id") or ""),
+                granted_at=int(c.get("granted_at") or c.get("grantedAt") or 0),
+                expires_at=(int(c["expires_at"] if c.get("expires_at") is not
+                                None else c.get("expiresAt", 0)) or None),
+                reset_type=str(c.get("reset_type") or c.get("resetType")
+                               or "unknown"),
+                status=str(c.get("status") or "available"),
+                title=c.get("title"),
+            ))
+    except Exception:
+        pass                       # credits stay empty on any failure
+    return snap
+
+
+def models_from_cache(codex_home: str) -> list[dict] | None:
+    """Model catalog from the app-maintained models_cache.json.
+
+    Zero network: the desktop app keeps this file fresh. Returns None when
+    the cache is missing or unreadable (caller falls back to app-server).
+    """
+    import json as _json
+    path = os.path.join(codex_home, "models_cache.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = _json.load(f)
+        out = []
+        for m in (data.get("models") or []):
+            vis = str(m.get("visibility") or "").lower()
+            if vis in ("hidden", "internal", "private"):
+                continue
+            slug = m.get("slug") or m.get("id") or ""
+            if not slug:
+                continue
+            out.append({"id": slug,
+                        "name": m.get("display_name") or slug})
+        return sorted(out, key=lambda x: x["name"].lower()) or None
+    except (OSError, ValueError):
+        return None
 
 
 def list_models(codex_bin: str) -> list[dict]:
