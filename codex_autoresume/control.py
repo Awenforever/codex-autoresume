@@ -133,6 +133,7 @@ pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,.4)}
  stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
  <div><h1>Codex 守护</h1><div class="sub">额度重置后自动继续任务 · 仅本机</div></div>
  <div class="hright" id="chips"></div>
+ <button class="btn-mini" style="flex:none" onclick="refresh();toast('已刷新')">刷新</button>
 </header>
 <div class="card"><div class="hero" id="quota">
  <div style="color:var(--dim);font-size:13px">加载中…</div>
@@ -310,6 +311,7 @@ class ControlApi:
                 self.send_response(code)
                 self.send_header("Content-Type",
                                  "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -320,6 +322,7 @@ class ControlApi:
                     self.send_response(200)
                     self.send_header("Content-Type",
                                      "text/html; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store")
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)
