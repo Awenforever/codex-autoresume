@@ -471,6 +471,7 @@ class Daemon:
                 self._snapshot.primary.used_percent,
                 self._snapshot.secondary.used_percent)
             self._watch_reset_credits()
+            self._record_reset_events()
             p, s = self._snapshot.primary, self._snapshot.secondary
             log.info("quota snapshot: allowed=%s primary=%s%% "
                      "secondary=%s%% credits=%d",
@@ -478,6 +479,42 @@ class Daemon:
                      p.used_percent, s.used_percent,
                      len(self._snapshot.reset_credits))
         return self._snapshot
+
+    def _record_reset_events(self) -> None:
+        """Record quota windows ACTUALLY resetting (used% big drop).
+
+        The panel shows these as observed landing times, distinct from the
+        tracker site's announcements (which are forecasts/global data).
+        """
+        try:
+            snap = self._snapshot
+            if snap is None:
+                return
+            prev_p = getattr(self, "_prev_primary_pct", None)
+            prev_s = getattr(self, "_prev_secondary_pct", None)
+            events = []
+            if (prev_p is not None and snap.primary.used_percent is not None
+                    and prev_p - snap.primary.used_percent >= 10):
+                events.append({"kind": "primary", "at":
+                               _now().isoformat(timespec="seconds")})
+            if (prev_s is not None and snap.secondary.used_percent is not None
+                    and prev_s - snap.secondary.used_percent >= 10):
+                events.append({"kind": "weekly", "at":
+                               _now().isoformat(timespec="seconds")})
+            if snap.primary.used_percent is not None:
+                self._prev_primary_pct = snap.primary.used_percent
+            if snap.secondary.used_percent is not None:
+                self._prev_secondary_pct = snap.secondary.used_percent
+            if events:
+                st = self.state
+                st.reset_events = (st.reset_events or [])[-19:] + events
+                save_state(st)
+                self._state_mtime = os.path.getmtime(st.state_path)
+                for ev in events:
+                    log.info("reset observed: %s window rolled over at %s",
+                             ev["kind"], ev["at"])
+        except Exception:
+            pass
 
     def _effective_thread_config(self, thread_id: str, t) -> dict:
         """Config [threads] merged with state-level control-UI overrides."""

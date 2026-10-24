@@ -117,11 +117,49 @@ def parse_full_utc(text: str) -> datetime | None:
         return None
 
 
+def _pacific_local(text: str) -> str | None:
+    """First Pacific clock in *text* -> local "%m-%d %H:%M" (or None)."""
+    m = _PACIFIC_CLOCK.search(text)
+    if not m:
+        return None
+    prefix, h, mi, ampm, zone = m.groups()
+    try:
+        now = datetime.now(timezone.utc)
+        hour = int(h)
+        if ampm:
+            ap = ampm.lower()
+            if ap == "pm" and hour < 12:
+                hour += 12
+            if ap == "am" and hour == 12:
+                hour = 0
+        if hour > 23:
+            return None
+        base = now.replace(hour=hour, minute=int(mi or 0), second=0,
+                           microsecond=0)
+        if prefix and "tomorrow" in prefix.lower():
+            base += timedelta(days=1)
+        loc = (base + timedelta(hours=_pacific_offset_hours(now))).astimezone()
+        return loc.strftime("%m-%d %H:%M")
+    except Exception:
+        return None
+
+
+_LOCAL_NOTE = re.compile(r"（本机[^）]*）")
+
+
+def _status_short(text: str) -> str:
+    """Compact one-liner: drop localized-time notes, trim hard at 70 chars."""
+    t = _LOCAL_NOTE.sub("", text or "")
+    t = t.strip()
+    return t[:70] + ("…" if len(t) > 70 else "")
+
+
 def fetch_announcement(url: str = DEFAULT_URL,
                        timeout: float = 15) -> dict:
     """Fetch and parse the tracker page. Never raises."""
     out = {"url": url, "latest_reset": None, "latest_reset_local": None,
            "status": None, "status_kind": None, "landing": None,
+           "status_short": None, "upcoming_local": None,
            "fetched_at": None}
     try:
         req = urllib.request.Request(url, headers={"User-Agent": UA,
@@ -144,9 +182,13 @@ def fetch_announcement(url: str = DEFAULT_URL,
             out["status"] = _localize_clocks(_strip_tags(landed.group(0)))
             out["status_kind"] = "landed"
         elif upcoming:
-            out["status"] = _localize_clocks(_strip_tags(upcoming.group(0)))
+            raw = _strip_tags(upcoming.group(0))
+            out["status"] = _localize_clocks(raw)
             out["status_kind"] = "upcoming"
             out["landing"] = out["status"]
+            out["upcoming_local"] = _pacific_local(raw)
+        if out["status"]:
+            out["status_short"] = _status_short(out["status"])
         out["fetched_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     except Exception:
         pass

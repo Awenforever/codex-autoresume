@@ -47,6 +47,8 @@ border:1px solid var(--line);color:var(--dim);background:var(--card)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;
 padding:16px 18px;margin-bottom:13px}
 .hero{display:flex;gap:28px;align-items:center;flex-wrap:wrap}
+.ringcol{display:flex;flex-direction:column;align-items:center;gap:12px}
+.ringrow{display:flex;gap:18px}
 .ringwrap{display:flex;flex-direction:column;align-items:center;gap:4px}
 .ring{position:relative;width:92px;height:92px}
 .ring svg{width:92px;height:92px;transform:rotate(-90deg);display:block}
@@ -56,7 +58,7 @@ padding:16px 18px;margin-bottom:13px}
 justify-content:center;font-size:16px;font-weight:700}
 .ringlbl{font-size:12px;color:var(--dim)}
 .ringreset{font-size:11px;color:var(--dim)}
-.hinfo{flex:1;min-width:210px;display:flex;flex-direction:column;gap:7px}
+.hinfo{flex:1;min-width:230px;display:flex;flex-direction:column;gap:7px}
 .kv{display:flex;justify-content:space-between;font-size:13px;color:var(--dim);
 border-bottom:1px dashed var(--line);padding-bottom:5px;gap:12px}
 .kv b{color:var(--fg);font-weight:600;text-align:right}
@@ -86,8 +88,10 @@ text-overflow:ellipsis;flex:1;min-width:0}
 .badge.gstat{background:#3a3320;color:var(--warn)}
 .meta{font-size:11.5px;color:var(--dim);margin:5px 0 11px 17px}
 .meta em{font-style:normal;color:#a8b3ba}
-.controls{display:flex;gap:11px;align-items:center;flex-wrap:nowrap;overflow-x:auto;
+.controls{display:flex;gap:11px;align-items:center;flex-wrap:wrap;
 padding-left:17px;border-top:1px solid var(--line);padding-top:11px}
+.controls2{display:flex;gap:11px;align-items:center;flex-wrap:wrap;
+padding-left:17px;margin-top:9px}
 .ctl{display:flex;align-items:center;gap:7px;position:relative}
 .ctl label{font-size:12px;color:var(--dim)}
 .tip{position:relative;cursor:help}
@@ -96,8 +100,10 @@ left:50%;transform:translateX(-50%);background:#20272c;color:#dfe6ea;
 font-size:11.5px;line-height:1.5;padding:7px 11px;border-radius:9px;
 white-space:normal;width:220px;border:1px solid var(--line);
 box-shadow:0 8px 22px rgba(0,0,0,.45);opacity:0;pointer-events:none;
-transition:opacity .15s;z-index:30;text-align:left}
+transition:opacity .15s;z-index:9999;text-align:left}
 .tip:hover:after{opacity:1}
+.tip.end:after{left:auto;right:-8px;transform:none}
+.tip.start:after{left:-8px;transform:none}
 .sw{position:relative;width:40px;height:22px;display:inline-block;flex:none}
 .sw input{opacity:0;width:0;height:0}
 .sw i{position:absolute;inset:0;background:#2c343a;border-radius:999px;
@@ -111,7 +117,7 @@ border-radius:9px;padding:5px 8px;font-size:12px;width:126px;transition:border-c
 input[type=text]:focus{outline:none;border-color:var(--accent)}
 input::placeholder{color:#5c666d}
 select{background:var(--card2);border:1px solid var(--line);color:var(--fg);
-border-radius:9px;padding:6px 8px;font-size:12.5px;width:104px}
+border-radius:9px;padding:6px 8px;font-size:12.5px;width:126px}
 select:focus{outline:none;border-color:var(--accent)}
 .prow{display:flex;gap:8px;align-items:center;padding:10px 0 0 17px;
 border-top:1px dashed var(--line);margin-top:10px;flex-wrap:wrap}
@@ -125,35 +131,87 @@ padding:8px 18px;border-radius:11px;font-size:13px;opacity:0;transition:.25s;
 pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,.4)}
 #toast.show{opacity:1}
 @media (max-width:680px){body{padding:12px 10px 30px}.hero{gap:14px}
-.controls{gap:10px}input[type=text]{width:118px}}
+.controls,.controls2{gap:10px}input[type=text]{width:118px}}
 </style></head><body>
 <header>
  <div class="logo"><svg viewBox="0 0 64 64"><path d="M32 4 54 12v18c0 15-9.5 25.5-22 30C19.5 55.5 10 45 10 30V12Z"
  fill="none" stroke="#fff" stroke-width="5"/><path d="M21 32.5 29 40.5 43 25" fill="none"
  stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
- <div><h1>Codex 守护</h1><div class="sub">额度重置后自动继续任务 · 仅本机</div></div>
+ <div><h1>Codex 守护</h1><div class="sub" data-i18n="sub">额度重置后自动继续任务 · 仅本机</div></div>
  <div class="hright" id="chips"></div>
- <button class="btn-mini" style="flex:none" onclick="refresh();toast('已刷新')">刷新</button>
+ <button class="btn-mini" style="flex:none;min-width:44px" id="langBtn" onclick="toggleLang()">CN</button>
+ <button class="btn-mini" style="flex:none" data-i18n="refresh" onclick="refresh();toast(L('refreshed'))">刷新</button>
 </header>
 <div class="card"><div class="hero" id="quota">
- <div style="color:var(--dim);font-size:13px">加载中…</div>
+ <div id="ld" style="color:var(--dim);font-size:13px">加载中…</div>
 </div>
 </div>
-<div class="sect">近期会话</div>
+<div class="sect" data-i18n="recent">近期会话</div>
 <div id="threads"></div>
-<div class="foot">打开方式：侧栏输入 <code>http://127.0.0.1:8765</code>（推荐，不消耗额度）· 桌面快捷方式 · 完整说明见插件 README</div>
+<div class="foot" id="foot"></div>
 <div id="toast"></div>
 <script>
 var eff=["","none","minimal","low","medium","high","xhigh"];
-function fmt(v){return (v===null||v===undefined)?"—":v}
-function fmtT(sec){if(!sec)return "";try{return new Date(sec*1000).toLocaleTimeString(
-"zh-CN",{hour:"2-digit",minute:"2-digit"})}catch(e){return ""}}
-function fmtDT(sec){if(!sec)return "";try{return new Date(sec*1000).toLocaleString(
-"zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}catch(e){return ""}}
+var LNG="zh";try{LNG=localStorage.getItem("cglang")||"zh"}catch(e){}
+var I18N={
+zh:{sub:"额度重置后自动继续任务 · 仅本机",refresh:"刷新",loading:"加载中…",
+w5:"5 小时窗口",wk:"周窗口",reset:"重置",status:"使用状态",limited:"额度受限",
+avail:"✓ 可正常使用",unknown:"状态未知",eta5:"5h 额度预估耗尽",etaw:"周额度预估耗尽",
+capped:"已按5h窗口上限折算",credits:"重置赠送",forecast:"预告",landed:"到账（实测）",
+news:"动态",pauseAll:"⏸ 全部暂停",resumeAll:"▶ 全部继续",running:"守护运行中",
+pausedC:"已暂停",recent:"近期会话",
+noThread:"暂无近期会话——在 Codex 里打开一个对话后刷新即可",
+guard:"守护",weekly:"跨周",card:"重置卡",noneC:"（无）",expirePfx:"（到期 ",
+model:"模型",inherit:"继承",prompt:"继续指令",resetD:"恢复默认",
+lastUpd:"最近",resumed:"成功恢复",times:" 次",tryPfx:"（尝试 ",trySfx:"）",
+nextChk:"下次检查",
+tipGuard:"打开则表示 5h 额度耗尽后自动继续任务",
+tipWeekly:"打开则表示守护开启时周额度重置后也自动继续任务",
+tipCard:"周额度耗尽且账户有官方重置卡时，自动消耗一张以继续任务",
+quotaNA:"额度快照暂不可用（网络波动），守护仍按重置时间正常工作",
+errConn:"无法连接守护进程：",errTimeout:"请求超时（8 秒无响应）",errFail:"连接失败",
+errHint:"。请点右上角「刷新」重试；若反复失败，启动：",
+upd:"已更新",restored:"已恢复默认指令",pauseOK:"守护已暂停",resumeOK:"守护已恢复",
+refreshed:"已刷新",
+footer:"打开方式：侧栏输入 <code>http://127.0.0.1:8765</code>（推荐，不消耗额度）· 桌面快捷方式 · 完整说明见插件 README"},
+en:{sub:"Auto-continue tasks after quota resets · local only",refresh:"Refresh",
+loading:"Loading…",w5:"5h window",wk:"Weekly",reset:"Resets",status:"Status",
+limited:"Limited",avail:"✓ Available",unknown:"Unknown",
+eta5:"5h quota exhaust ETA",etaw:"Weekly quota exhaust ETA",
+capped:"capped by 5h window",credits:"Reset credits",forecast:"Forecast",
+landed:"Landed (observed)",news:"News",pauseAll:"⏸ Pause all",
+resumeAll:"▶ Resume all",running:"Guard running",pausedC:"Paused",
+recent:"Recent threads",
+noThread:"No recent threads — open a conversation in Codex, then refresh",
+guard:"Guard",weekly:"Weekly",card:"Credit",noneC:"(none)",expirePfx:" (expires ",
+model:"Model",inherit:"Inherit",prompt:"Resume prompt",resetD:"Reset",
+lastUpd:"Updated",resumed:"resumed",times:" times",tryPfx:" (tried ",trySfx:")",
+nextChk:"next check",
+tipGuard:"On: auto-continue the task when the 5h quota resets",
+tipWeekly:"On: also continue after the weekly quota resets (while guard is on)",
+tipCard:"When weekly quota is exhausted and reset credits exist, consume one to continue",
+quotaNA:"Quota snapshot unavailable (network hiccup); guarding still works off reset times",
+errConn:"Cannot reach guard daemon: ",errTimeout:"request timed out (8s)",
+errFail:"connection failed",
+errHint:". Click Refresh (top-right); if it persists start: ",
+upd:"Updated",restored:"Prompt reset to default",pauseOK:"Guard paused",
+resumeOK:"Guard resumed",refreshed:"Refreshed",
+footer:"Open: type <code>http://127.0.0.1:8765</code> in the sidebar (recommended, no quota cost) · desktop shortcut · full docs in the plugin README"}};
+function L(k){var d=I18N[LNG]||I18N.zh;var v=d[k];
+return (v===undefined)?(I18N.zh[k]||k):v}
+function p2(n){return (n<10?"0":"")+n}
+function fmtHM(sec){if(!sec)return "";var d=new Date(sec*1000);
+return p2(d.getHours())+":"+p2(d.getMinutes())}
+function fmtMDHM(sec){if(!sec)return "";var d=new Date(sec*1000);
+return p2(d.getMonth()+1)+"-"+p2(d.getDate())+" "+p2(d.getHours())+":"+p2(d.getMinutes())}
+function fmtISO(iso){if(!iso)return "";
+if(String(iso).indexOf("T")<0)return String(iso);
+var d=new Date(iso);if(isNaN(d.getTime()))return String(iso);
+return p2(d.getMonth()+1)+"-"+p2(d.getDate())+" "+p2(d.getHours())+":"+p2(d.getMinutes())}
+function fmt(v){return (v===null||v===undefined)?"--":v}
 function lerp(a,b,t){return Math.round(a+(b-a)*t)}
 function hex2rgb(h){return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]}
 function ringColor(p){
- // pressure gradient: green <=50, green->amber 50..80, amber->red 80..100+
  var G=hex2rgb("#10a37f"),A=hex2rgb("#e0a341"),R=hex2rgb("#e5534b"),c;
  if(p<=50){c=G}else if(p<=80){var t=(p-50)/30;c=[lerp(G[0],A[0],t),lerp(G[1],A[1],t),lerp(G[2],A[2],t)]}
  else{var t2=(p-80)/20;c=[lerp(A[0],R[0],t2),lerp(A[1],R[1],t2),lerp(A[2],R[2],t2)]}
@@ -168,16 +226,14 @@ function ring(pct,label,reset){
  '" stroke-dasharray="'+C+'" stroke-dashoffset="'+off+'"/></svg>'+
  '<div class="pct" style="color:'+col+'">'+fmt(pct)+"%</div></div>"+
  '<div class="ringlbl">'+label+"</div>"+
- (reset?'<div class="ringreset">重置 '+reset+"</div>":"")+"</div>"}
-function etaRow(name,q,etaK,rateK,win,cappedK){
+ (reset?'<div class="ringreset">'+L("reset")+" "+reset+"</div>":"")+"</div>"}
+function etaRow(label,q,etaK,rateK,cappedK){
  var eta=q[etaK],rate=q[rateK];
- var b;
- if(eta){b='<b class="eta">'+fmtDT(eta)+"</b>"}
- else if(rate){b="<b>—</b>"}
- else{b="<b>采样中</b>"}
- var tail=(rate?(' <span style="font-size:11px">（'+rate+"%/h）</span>"):"")
- if(cappedK&&q[cappedK]){tail+=' <span style="font-size:11px;color:var(--dim)">已按5h窗口上限折算</span>'}
- return '<div class="kv"><span>'+name+"预估耗尽</span><span>"+b+tail+"</span></div>"}
+ var b=(eta?('<b class="eta">'+fmtMDHM(eta)+"</b>"):"<b>--</b>");
+ var tail=(rate?(' <span style="font-size:11px">（'+rate+"%/h）</span>"):"");
+ if(cappedK&&q[cappedK]){tail+=' <span style="font-size:11px;color:var(--dim)">'+L("capped")+"</span>"}
+ return '<div class="kv"><span>'+label+"</span><span>"+b+tail+"</span></div>"}
+function kvRow(k,v){return '<div class="kv"><span>'+k+"</span><span>"+v+"</span></div>"}
 function toast(m){var t=document.getElementById("toast");t.textContent=m;
 t.classList.add("show");setTimeout(function(){t.classList.remove("show")},1500)}
 function api(p,o){var init=o?{method:"POST",headers:{"Content-Type":"application/json"},
@@ -189,37 +245,49 @@ for(var k=0;k<ms.length;k++){o+='<option '+((cur||"")===ms[k].id?"selected":"")+
 return o}
 function esc(s){return String(s===null||s===undefined?"":s).replace(/&/g,"&amp;")
 .replace(/</g,"&lt;").replace(/"/g,"&quot;")}
+function annRowsFor(s){
+ var ann=s.announcement||null,rows="";
+ var fct="--";
+ if(ann&&ann.upcoming_local){fct=esc(ann.upcoming_local)}
+ rows+=kvRow(L("forecast"),'<b class="eta">'+fct+"</b>");
+ var cand=[];
+ var evs=s.reset_events||[];
+ for(var i=0;i<evs.length;i++){if(evs[i].kind==="weekly"||evs[i].kind==="credit")cand.push(evs[i])}
+ var ces=s.credit_events||[];
+ for(var j=0;j<ces.length;j++){cand.push({kind:"credit",at:ces[j].landed_at,title:ces[j].title})}
+ var landTxt="--";
+ if(cand.length){
+ cand.sort(function(a,b){return String(b.at).localeCompare(String(a.at))});
+ var e0=cand[0];
+ landTxt=fmtISO(e0.at)+" · "+(e0.kind==="weekly"?L("wk"):L("card"))}
+ rows+=kvRow(L("landed"),'<b class="ok">'+esc(landTxt)+"</b>");
+ if(ann&&ann.status_short){rows+=kvRow(L("news"),
+ '<b style="font-weight:500" title="'+esc(ann.status||"")+'">'+esc(ann.status_short)+"</b>")}
+ return rows}
 function refresh(){
 return api("/api/status").then(function(s){
 window.__s=s;
 var q=s.quota,qh="";
-var annRows="";
-var ann=s.announcement||null;
-if(ann&&ann.status){annRows+='<div class="kv"><span>官方重置动态</span><b style="font-weight:500">'+esc(ann.status)+"</b></div>"}
-if(ann&&ann.latest_reset){annRows+='<div class="kv"><span>最近全球重置</span><b>'+esc(ann.latest_reset_local||ann.latest_reset)+"</b></div>"}
-var ce=s.credit_events||[];
-if(ce&&ce.length){var lastCe=ce[ce.length-1];
-annRows+='<div class="kv"><span>重置卡实际到账</span><b class="ok">'+esc(String(lastCe.landed_at||"").replace("T"," ").slice(5,16))+" · "+esc(lastCe.title||lastCe.id)+"</b></div>"}
-
+var annRows=annRowsFor(s);
 if(!q){
-qh='<div style="flex:1;color:var(--dim);font-size:13px">额度快照暂不可用（网络波动），守护仍按重置时间正常工作</div>';
+qh='<div style="flex:1;color:var(--dim);font-size:13px">'+L("quotaNA")+"</div>";
 }else{
-qh=ring(q.primary_used,"5 小时窗口",fmtT(q.primary_reset))+
-ring(q.secondary_used,"周窗口",fmtT(q.secondary_reset))+
+qh='<div class="ringcol"><div class="ringrow">'+
+ring(q.primary_used,L("w5"),fmtHM(q.primary_reset))+
+ring(q.secondary_used,L("wk"),fmtMDHM(q.secondary_reset))+
+'</div><button class="btn-main" style="width:100%" onclick="togglePause()">'+
+(s.paused?L("resumeAll"):L("pauseAll"))+"</button></div>"+
 '<div class="hinfo">'+
-'<div class="kv"><span>使用状态</span><b class="'+(q.allowed===false?"bad":"ok")+'">'+
-(q.allowed===false?"额度受限":q.allowed===true?"✓ 可正常使用":"状态未知")+"</b></div>"+
-etaRow("5h 额度",q,"eta_primary","rate_primary","1h")+
-etaRow("周额度",q,"eta_secondary","rate_secondary","5h","eta_secondary_capped")+
-'<div class="kv"><span>重置赠送</span><b>'+fmt((q.credits_count!==undefined)?q.credits_count:q.credits)+" 个</b></div>"+annRows+
-'<div style="margin-top:4px"><button class="btn-main" onclick="togglePause()">'+
-(s.paused?"▶ 恢复守护":"⏸ 全部暂停")+"</button></div></div>";
+kvRow(L("status"),'<b class="'+(q.allowed===false?"bad":"ok")+'">'+
+(q.allowed===false?L("limited"):q.allowed===true?L("avail"):L("unknown"))+"</b>")+
+etaRow(L("eta5"),q,"eta_primary","rate_primary")+
+etaRow(L("etaw"),q,"eta_secondary","rate_secondary","eta_secondary_capped")+
+kvRow(L("credits"),'<b>'+fmt((q.credits_count!==undefined)?q.credits_count:q.credits)+"</b>")+
+annRows+"</div>";
 }
 document.getElementById("quota").innerHTML=qh;
-var ann=s.announcement||null;
-var ce=s.credit_events||[];
 document.getElementById("chips").innerHTML=
-'<span class="chip '+(s.paused?"":"on")+'">'+(s.paused?"已暂停":"守护运行中")+"</span>"+
+'<span class="chip '+(s.paused?"":"on")+'">'+(s.paused?L("pausedC"):L("running"))+"</span>"+
 '<span class="chip '+(s.dry_run?"dry":"on")+'">'+(s.dry_run?"DRY-RUN":"LIVE")+"</span>";
 var dl="";
 if(s.models&&s.models.length){
@@ -235,61 +303,73 @@ for(var i=0;i<ts.length;i++){
 var t=ts[i];
 var badges=(t.is_goal?'<span class="badge goal">GOAL</span>':"")+
 (t.goal_status?'<span class="badge gstat">'+esc(t.goal_status)+"</span>":"");
-var tries=(t.attempts&&t.attempts>t.resumes)?"（尝试 "+t.attempts+"）":"";
+var tries=(t.attempts&&t.attempts>t.resumes)?(L("tryPfx")+t.attempts+L("trySfx")):"";
 var cq0=s.quota||{};
 var cc0=(cq0.credits_count!==undefined)?cq0.credits_count:cq0.credits;
-var cInfo=(cc0?("×"+cc0):"（无）");
-if(cc0&&cq0.credits_nearest_expiry){var ed=new Date(cq0.credits_nearest_expiry*1000);
-try{cInfo+="（到期 "+ed.toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})+"）"}catch(e){}}
-var cardSwitch='<div class="ctl tip" data-tip="周额度耗尽且账户有官方重置卡时，自动消耗一张以继续任务">'+
+var cInfo=(cc0?("×"+cc0):L("noneC"));
+if(cc0&&cq0.credits_nearest_expiry){cInfo+=L("expirePfx")+fmtMDHM(cq0.credits_nearest_expiry)+")"}
+var cardSwitch='<div class="ctl tip end" data-tip="'+esc(L("tipCard"))+'">'+
 '<label class="sw"><input type="checkbox"'+(t.reset_card?" checked":"")+
 ' onchange="setT(\''+t.id+'\',{reset_card:this.checked})"><i></i></label>'+
-'<label>重置卡</label><span style="font-size:11px;color:var(--dim)">'+cInfo+"</span></div>";
+'<label>'+L("card")+'</label><span style="font-size:11px;color:var(--dim)">'+cInfo+"</span></div>";
 var promptRow="";
 if(!t.is_goal){
-promptRow='<div class="prow"><label style="font-size:12px;color:var(--dim)">继续指令</label>'+
+promptRow='<div class="prow"><label style="font-size:12px;color:var(--dim)">'+L("prompt")+"</label>"+
 '<input type="text" id="pp_'+t.id.slice(0,8)+'" value="'+esc(t.prompt)+
 '" placeholder="'+esc(defp)+'" onchange="setT(\''+t.id+'\',{prompt:this.value})">'+
-'<button class="btn-mini" onclick="resetPrompt(\''+t.id+'\')">恢复默认</button></div>';
+'<button class="btn-mini" onclick="resetPrompt(\''+t.id+'\')">'+L("resetD")+"</button></div>";
 }
+var rsel='<div class="ctl"><label>Reasoning</label><select onchange="setT(\''+t.id+
+'\',{effort:this.value})">';
+for(var j=0;j<eff.length;j++){rsel+='<option '+((eff[j]===(t.effort||""))?"selected":"")+
+' value="'+eff[j]+'">'+(eff[j]||L("inherit"))+"</option>"}
+rsel+="</select></div>";
+var modelCtl='<div class="ctl"><label>'+L("model")+'</label><select onchange="setT(\''+t.id+
+'\',{model:this.value})"><option '+((t.model||"")===""?"selected":"")+' value="">'+
+L("inherit")+"</option>"+modelOpts(t.model)+"</select></div>";
 rows+=(i===0?dl:"")+
 '<div class="tcard '+(t.guard?"guard":"")+'">'+
 '<div class="thead"><span class="dot"></span><span class="ttl">'+
 esc((t.title||"")||String(t.id||"").slice(0,13))+badges+"</span></div>"+
-'<div class="meta">最近 '+fmt(t.updated)+" · 成功恢复 <em>"+fmt(t.resumes)+
-"</em> 次"+tries+
-(t.next_wake?" · 下次检查 "+String(t.next_wake).replace("T"," ").slice(5,16):"")+
-(t.last_outcome?" · "+esc(t.last_outcome):"")+"</div>"+
+'<div class="meta">'+L("lastUpd")+" "+fmt(t.updated)+" · "+L("resumed")+" <em>"+fmt(t.resumes)+
+"</em>"+L("times")+tries+
+(t.next_wake?(" · "+L("nextChk")+" "+String(t.next_wake).replace("T"," ").slice(5,16)):"")+
+(t.last_outcome?(" · "+esc(t.last_outcome)):"")+"</div>"+
 '<div class="controls">'+
-'<div class="ctl tip" data-tip="打开则表示 5h 额度耗尽后自动继续任务">'+
+'<div class="ctl tip start" data-tip="'+esc(L("tipGuard"))+'">'+
 '<label class="sw"><input type="checkbox"'+(t.guard?" checked":"")+
 ' onchange="setT(\''+t.id+'\',{guard:this.checked})"><i></i></label>'+
-'<label>守护</label></div>'+
-'<div class="ctl tip" data-tip="打开则表示守护开启时周额度重置后也自动继续任务">'+
+'<label>'+L("guard")+"</label></div>"+
+'<div class="ctl tip" data-tip="'+esc(L("tipWeekly"))+'">'+
 '<label class="sw"><input type="checkbox"'+(t.weekly?" checked":"")+
 ' onchange="setT(\''+t.id+'\',{weekly:this.checked})"><i></i></label>'+
-'<label>跨周</label></div>'+
-cardSwitch+
-'<div class="ctl"><label>模型</label><select onchange="setT(\''+t.id+'\',{model:this.value})"><option '+((t.model||"")===""?"selected":"")+' value="">继承</option>'+modelOpts(t.model)+"</select></div>"+
-'<div class="ctl"><label>Reasoning</label><select onchange="setT(\''+t.id+
-'\',{effort:this.value})">';
-for(var j=0;j<eff.length;j++){rows+='<option '+((eff[j]===(t.effort||""))?"selected":"")+
-' value="'+eff[j]+'">'+(eff[j]||"继承")+"</option>"}
-rows+="</select></div></div>"+promptRow+"</div>";
+'<label>'+L("weekly")+"</label></div>"+
+cardSwitch+"</div>"+
+'<div class="controls2">'+modelCtl+rsel+"</div>"+promptRow+"</div>";
 }
 document.getElementById("threads").innerHTML=rows||
-'<div class="card empty">暂无近期会话——在 Codex 里打开一个对话后刷新即可</div>';
+'<div class="card empty">'+L("noThread")+"</div>";
 }).catch(function(e){
-var why=(e&&e.message==="timeout")?"请求超时（8 秒无响应）":"连接失败";
+var why=(e&&e.message==="timeout")?L("errTimeout"):L("errFail");
 document.getElementById("quota").innerHTML=
-'<div style="color:var(--danger);font-size:13px">无法连接守护进程：'+why+
-'。请点右上角「刷新」重试；若反复失败，启动：schtasks /Run /TN codex-autoresume</div>'})}
-function setT(id,o){api("/api/threads/"+id,o).then(function(){toast("已更新");refresh()})}
+'<div style="color:var(--danger);font-size:13px">'+L("errConn")+why+L("errHint")+
+"schtasks /Run /TN codex-autoresume</div>"})}
+function setT(id,o){api("/api/threads/"+id,o).then(function(){toast(L("upd"));refresh()})}
 function resetPrompt(id){api("/api/threads/"+id,{prompt:""}).then(function(){
-toast("已恢复默认指令");refresh()})}
+toast(L("restored"));refresh()})}
 function togglePause(){var s=window.__s;api("/api/pause",{paused:!s.paused}).then(
-function(){toast(s.paused?"守护已恢复":"守护已暂停");refresh()})}
-refresh();setInterval(refresh,15000);
+function(){toast(s.paused?L("resumeOK"):L("pauseOK"));refresh()})}
+function applyLang(){
+var els=document.querySelectorAll("[data-i18n]");
+for(var i=0;i<els.length;i++){els[i].textContent=L(els[i].getAttribute("data-i18n"))}
+var lb=document.getElementById("langBtn");if(lb){lb.textContent=(LNG==="en")?"EN":"CN"}
+var ft=document.getElementById("foot");if(ft){ft.innerHTML=L("footer")}
+var ld=document.getElementById("ld");if(ld){ld.textContent=L("loading")}
+try{document.documentElement.lang=(LNG==="en")?"en":"zh-CN"}catch(e){}}
+function toggleLang(){LNG=(LNG==="zh")?"en":"zh";
+try{localStorage.setItem("cglang",LNG)}catch(e){}
+applyLang();refresh()}
+applyLang();refresh();setInterval(refresh,15000);
 </script></body></html>"""
 
 
@@ -438,6 +518,7 @@ class ControlApi:
             "default_prompt": d.cfg["resume"]["prompt_generic"],
             "announcement": ann,
             "credit_events": list((st.credit_events if st else []))[-5:],
+            "reset_events": list((st.reset_events if st else []))[-8:],
             "threads": out_threads,
         }
 
