@@ -46,6 +46,12 @@ or its local HTTP API at `http://127.0.0.1:8765` (fallback: `curl`).
 - "用 gpt-6.1-sol high 继续" → set_guard(guard=true, model="gpt-6.1-sol",
   effort="high")
 - "看下额度" → autoresume_status()
+- "打开守护面板 / 显示控制面板" → open **http://127.0.0.1:8765** in the
+  in-app browser (use your browser/navigation tool if available, or tell
+  the user to click/open the URL — Codex opens links in the in-app browser
+  by default). The panel shows every recent conversation with guard
+  toggles, weekly switches, per-resume model/effort inputs and the quota
+  windows.
 
 If the tools report the control API is unreachable, the daemon is not
 running: tell the user to run `schtasks /Run /TN codex-autoresume`

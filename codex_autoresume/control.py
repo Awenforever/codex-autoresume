@@ -75,6 +75,10 @@ color:var(--fg);border-radius:7px;padding:4px 7px;font-size:12px;width:118px}
 background:#1f2f28;color:var(--accent);border:1px solid var(--accent);
 padding:7px 16px;border-radius:10px;font-size:13px;opacity:0;transition:.25s;pointer-events:none}
 #toast.show{opacity:1}
+@media (max-width:680px){body{padding:10px;max-width:none}
+.row{flex-wrap:wrap;gap:8px}.ttl{flex-basis:100%}
+.quota{gap:10px}.qitem{min-width:140px;flex:1 1 45%}
+h1{font-size:14px}}
 </style></head><body>
 <h1><span class="dot"></span>codex-autoresume <span style="color:var(--dim);
 font-weight:400">守护控制台</span></h1>
