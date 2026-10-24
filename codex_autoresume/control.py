@@ -138,6 +138,7 @@ return '<div class="row">'+
 ' <div class="ttl"><b>'+((t.title||"")||(t.id||"").slice(0,13))+
 (t.is_goal?'<span class="badge">GOAL</span>':"")+gs+"</b>"+
 '<span>最近 '+fmt(t.updated)+" · 恢复 "+fmt(t.resumes)+" 次"+
+((t.attempts&&t.attempts>t.resumes)?"（尝试 "+t.attempts+"）":"")+
 (t.next_wake?" · 下次 "+String(t.next_wake).replace("T"," ").slice(5,16):"")+
 (t.last_outcome?" · "+t.last_outcome:"")+"</span></div>"+
 ' <div class="ctl"><label>守护</label><label class="sw"><input type="checkbox"'+
@@ -247,7 +248,8 @@ class ControlApi:
                 "weekly": bool(tc.get("weekly_resume")),
                 "model": tc.get("model") or "",
                 "effort": tc.get("reasoning_effort") or "",
-                "resumes": t.total_resumes if t else 0,
+                "resumes": (t.success_resumes if t else 0),
+                "attempts": (t.total_resumes if t else 0),
                 "last_outcome": t.last_outcome if t else "",
                 "next_wake": (t.next_wake_iso[:19] if t and t.next_wake_iso
                               else None),

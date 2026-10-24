@@ -495,6 +495,7 @@ class Daemon:
                      "effort": decision.reasoning_effort,
                      "goal_status": new_status}
             t.append_history(entry)
+            t.success_resumes += 1
             t.last_outcome = "goal_continue"
             t.fail_streak = 0
             t.last_kind = ""          # handed back to the goal engine
@@ -530,6 +531,7 @@ class Daemon:
         t.append_history(entry)
         t.last_outcome = outcome.kind
         if outcome.ok:
+            t.success_resumes += 1
             t.fail_streak = 0
             t.last_kind = ""            # interruption handled
             t.last_reset_at = None

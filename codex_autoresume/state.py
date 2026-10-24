@@ -32,7 +32,8 @@ class ThreadState:
     last_resume_iso: str | None = None
     resume_count_today: int = 0
     resume_count_day: str = ""          # YYYY-MM-DD bucket
-    total_resumes: int = 0
+    total_resumes: int = 0             # attempts (budget cap counter)
+    success_resumes: int = 0           # resumes that actually continued work
     fail_streak: int = 0
     last_outcome: str = ""
     last_error: str = ""
@@ -95,8 +96,13 @@ def load_state(state_path: str) -> WatcherState:
             if raw.get("version", STATE_VERSION) != STATE_VERSION:
                 raise StateError("state version mismatch: %r" % raw.get("version"))
             for tid, t in raw.get("threads", {}).items():
-                st.threads[tid] = ThreadState(**{k: v for k, v in t.items()
-                                                 if k in ThreadState.__dataclass_fields__})
+                ts = ThreadState(**{k: v for k, v in t.items()
+                                    if k in ThreadState.__dataclass_fields__})
+                if "success_resumes" not in t:
+                    # migrate older state: derive successes from history
+                    ts.success_resumes = sum(
+                        1 for h in ts.history if h.get("ok") is True)
+                st.threads[tid] = ts
             st.seen_sources = set(raw.get("seen_sources", []))
             st.turns_watermark = int(raw.get("turns_watermark", 0))
             st.global_resume_count_today = int(raw.get("global_resume_count_today", 0))

@@ -33,6 +33,21 @@ class TestState(unittest.TestCase):
         self.assertTrue(t.bump_resume_counter("2026-10-25", cap=3))
         self.assertEqual(t.resume_count_today, 1)
 
+    def test_success_counter_migrates_from_history(self):
+        d = tempfile.mkdtemp(prefix="cxr-succ-")
+        path = os.path.join(d, "state.json")
+        st = WatcherState(state_path=path)
+        t = st.thread("t1")
+        t.total_resumes = 3
+        t.append_history({"at": "a", "ok": True})
+        t.append_history({"at": "b", "ok": False})
+        t.append_history({"at": "c", "ok": True})
+        save_state(st)
+        st2 = load_state(path)
+        # attempts preserved; successes derived from history on old state
+        self.assertEqual(st2.threads["t1"].total_resumes, 3)
+        self.assertEqual(st2.threads["t1"].success_resumes, 2)
+
     def test_history_cap(self):
         t = ThreadState()
         for i in range(60):
