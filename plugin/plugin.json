@@ -12,16 +12,22 @@
     "autoresume": {
       "type": "stdio",
       "command": "python",
-      "args": ["-m", "codex_autoresume.mcp_server"]
+      "args": [
+        "-m",
+        "codex_autoresume.mcp_server"
+      ]
     }
   },
   "interface": {
     "displayName": "AutoResume Guard",
     "shortDescription": "Auto-continue conversations after usage-limit resets",
-    "longDescription": "Keep long tasks and goals running unattended. When the ChatGPT usage limit interrupts a conversation, AutoResume Guard waits for the quota window to reset and continues it - goals via the official continue action, ordinary threads via a resume prompt - with your chosen model and reasoning effort per resume.",
+    "longDescription": "Keep long tasks and goals running unattended. When the ChatGPT usage limit interrupts a conversation, AutoResume Guard waits for the quota window to reset and continues it - goals via the official continue action, ordinary threads via a resume prompt - with your chosen model and reasoning effort per resume. 控制面板 / Control panel: http://127.0.0.1:8765",
     "developerName": "codex-autoresume contributors",
     "category": "Developer Tools",
-    "capabilities": ["Interactive", "Write"],
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
     "defaultPrompt": [
       "为当前对话开启自动继续守护",
       "Enable auto-continue guarding for this conversation with model gpt-6.1-sol and high reasoning",
@@ -31,6 +37,7 @@
     "brandColor": "#10A37F",
     "composerIcon": "./assets/composerIcon.svg",
     "logo": "./assets/logo.svg",
-    "screenshots": []
+    "screenshots": [],
+    "websiteURL": "http://127.0.0.1:8765/"
   }
 }

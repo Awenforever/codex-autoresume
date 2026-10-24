@@ -12,16 +12,23 @@
     "autoresume": {
       "type": "stdio",
       "command": "python",
-      "args": ["-m", "codex_autoresume.mcp_server"]
+      "args": [
+        "-m",
+        "codex_autoresume.mcp_server"
+      ]
     }
   },
   "interface": {
     "displayName": "AutoResume Guard",
     "shortDescription": "Auto-continue conversations after usage-limit resets",
     "category": "Developer Tools",
-    "capabilities": ["Interactive", "Write"],
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
     "brandColor": "#10A37F",
     "composerIcon": "./assets/composerIcon.svg",
-    "logo": "./assets/logo.svg"
+    "logo": "./assets/logo.svg",
+    "websiteURL": "http://127.0.0.1:8765/"
   }
 }
