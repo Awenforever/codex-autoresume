@@ -90,3 +90,21 @@ class TestAnnouncements(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForecastEpochTest(unittest.TestCase):
+    def test_pacific_clock_to_epoch(self):
+        from codex_autoresume.announcements import forecast_epoch
+        e = forecast_epoch(
+            "Landing tomorrow before 10am PST together with a small ship.")
+        self.assertIsInstance(e, int)
+        # 10:00 Pacific (UTC-7/-8) must land at 17:00/18:00 UTC the same or
+        # next day: verify the UTC hour, not the local rendering
+        import datetime as dt
+        u = dt.datetime.fromtimestamp(e, tz=dt.timezone.utc)
+        self.assertIn(u.hour, (17, 18), "UTC hour of 10am Pacific")
+
+    def test_no_clock_returns_none(self):
+        from codex_autoresume.announcements import forecast_epoch
+        self.assertIsNone(forecast_epoch("By midnight PST"))
+        self.assertIsNone(forecast_epoch(""))

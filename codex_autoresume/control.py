@@ -299,16 +299,21 @@ function snapAge(q){
  var w=(n<60)?(n+"s"):Math.round(n/60)+"min";
  return L("snapAge")+" "+w}
 function fmtPostAt(iso){
- if(String(iso).indexOf("Z")>=0||String(iso).indexOf("+00:00")>=0){
- var d=new Date(iso);
- if(!isNaN(d.getTime())){return p2(d.getUTCMonth()+1)+"-"+p2(d.getUTCDate())+" "+
- p2(d.getUTCHours())+":"+p2(d.getUTCMinutes())+" UTC"}}
+ // the poster's own wall clock: tracker authors post in Pacific time, so
+ // render the post instant in America/Los_Angeles (DST-aware via Intl)
+ try{
+ var f=new Intl.DateTimeFormat("en-US",{timeZone:"America/Los_Angeles",
+ month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false});
+ var fpa=f.formatToParts(new Date(iso)),pa={};
+ for(var i=0;i<fpa.length;i++){pa[fpa[i].type]=fpa[i].value}
+ var r=pa.month+"-"+pa.day+" "+pa.hour+":"+pa.minute+" PT";
+ if(r.indexOf("undefined")<0){return r}
+ }catch(e){}
  return fmtISO(iso)}
 function annRowsFor(s){
  var ann=s.announcement||null,rows="";
  var fct="--";
- if(ann&&ann.status_kind==="upcoming"&&ann.status_short){
- fct=esc(ann.status_short)}
+ if(ann&&ann.forecast_epoch){fct=fmtMDHM(ann.forecast_epoch)}
  rows+=kvRow(L("forecast"),'<b class="eta">'+fct+"</b>");
  var cand=[];
  var evs=s.reset_events||[];

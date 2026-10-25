@@ -155,6 +155,38 @@ _POST_RE = re.compile(
 _LOCAL_NOTE = re.compile(r"（本机[^）]*）")
 
 
+def forecast_epoch(text: str) -> int | None:
+    """The Pacific clock in an upcoming announcement -> unix epoch.
+
+    "Landing tomorrow before 10am PST" is the poster's own frame (Tibo
+    posts in Pacific time); return the absolute instant so the panel can
+    render it in the reader's machine timezone.
+    """
+    m = _PACIFIC_CLOCK.search(text or "")
+    if not m:
+        return None
+    prefix, h, mi, ampm, zone = m.groups()
+    try:
+        hour = int(h)
+        if ampm:
+            ap = ampm.lower()
+            if ap == "pm" and hour < 12:
+                hour += 12
+            if ap == "am" and hour == 12:
+                hour = 0
+        if hour > 23:
+            return None
+        base = datetime.now(timezone.utc).replace(
+            hour=hour, minute=int(mi or 0), second=0, microsecond=0)
+        if prefix and "tomorrow" in prefix.lower():
+            base += timedelta(days=1)
+        # Pacific = UTC + offset (offset is negative): UTC = Pacific - offset
+        utc_instant = base - timedelta(hours=_pacific_offset_hours(base))
+        return int(utc_instant.timestamp())
+    except Exception:
+        return None
+
+
 def _status_short(text: str) -> str:
     """Compact one-liner: drop localized-time notes, trim hard at 70 chars."""
     t = _LOCAL_NOTE.sub("", text or "")
@@ -167,7 +199,7 @@ def fetch_announcement(url: str = DEFAULT_URL,
     """Fetch and parse the tracker page. Never raises."""
     out = {"url": url, "latest_reset": None, "latest_reset_local": None,
            "status": None, "status_kind": None, "landing": None,
-           "status_short": None, "upcoming_local": None,
+           "status_short": None, "forecast_epoch": None, "upcoming_local": None,
            "posts": [], "fetched_at": None}
     try:
         req = urllib.request.Request(url, headers={"User-Agent": UA,
@@ -201,9 +233,11 @@ def fetch_announcement(url: str = DEFAULT_URL,
             out["status"] = _strip_tags(landed.group(0))
             out["status_kind"] = "landed"
         elif upcoming:
-            out["status"] = _strip_tags(upcoming.group(0))
+            raw = _strip_tags(upcoming.group(0))
+            out["status"] = raw
             out["status_kind"] = "upcoming"
-            out["landing"] = out["status"]
+            out["landing"] = raw
+            out["forecast_epoch"] = forecast_epoch(raw)
         if out["status"]:
             out["status_short"] = _status_short(out["status"])
         out["fetched_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
