@@ -114,3 +114,45 @@ def eta_epoch(samples: list[tuple], idx: int, window_sec: float,
         capped = True
     hours = (100 - used) / rate
     return int(now + hours * 3600), rate, capped
+
+
+def simulate_weekly_eta(now: float, primary_used, secondary_used,
+                        rate_p_pct_h: float, ratio: float,
+                        primary_reset_epoch, primary_window_sec,
+                        secondary_reset_epoch=None,
+                        max_windows: int = 200):
+    """Weekly-exhaustion epoch by stepping through 5h windows.
+
+    Model: the 5h window is a hard gate. Within the current (partial)
+    window the primary can still drain at most (100 - P)% before its
+    reset; every reset opens a fresh window worth at most min(rate*5h,
+    100)% of primary. Weekly percent rises ``ratio`` per primary percent.
+    Walk window by window until the weekly quota crosses 100%. None when
+    the weekly reset arrives first or inputs are missing.
+    """
+    if (primary_used is None or secondary_used is None
+            or not rate_p_pct_h or not ratio or not primary_reset_epoch):
+        return None
+    if secondary_used >= 100:
+        return None
+    win_h = max(primary_window_sec or 5 * 3600, 900) / 3600.0
+    t = float(now)
+    # primary-% still to burn before weekly hits 100
+    need = (100.0 - secondary_used) / ratio
+    # first partial window: capped by remaining headroom AND reset time
+    span_h = max(primary_reset_epoch - t, 0.0) / 3600.0
+    avail = min(rate_p_pct_h * span_h, 100.0 - primary_used)
+    if avail > 0:
+        if need <= avail:
+            return t + need / rate_p_pct_h * 3600.0
+        need -= avail
+    t = max(primary_reset_epoch, t)
+    for _ in range(max_windows):
+        if secondary_reset_epoch and t >= secondary_reset_epoch:
+            return None
+        avail = min(rate_p_pct_h * win_h, 100.0)
+        if need <= avail:
+            return t + need / rate_p_pct_h * 3600.0
+        need -= avail
+        t += win_h * 3600.0
+    return None

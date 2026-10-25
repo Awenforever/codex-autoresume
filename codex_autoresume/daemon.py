@@ -237,7 +237,7 @@ class Daemon:
         # warm slow external caches off the HTTP path: /api/status serves
         # cache-only, so the panel can never hang on external fetches
         self.model_catalog()
-        self.announcement()
+        self._log_announcement(self.announcement())
 
         self._reap_finished_resumes()
 
@@ -482,6 +482,29 @@ class Daemon:
                      p.used_percent, s.used_percent,
                      len(self._snapshot.reset_credits))
         return self._snapshot
+
+    def _log_announcement(self, ann: dict | None) -> None:
+        """Append to news_log whenever the tracker text changes.
+
+        One entry per DISTINCT announcement (several per day are fine);
+        displayed verbatim, never truncated.
+        """
+        try:
+            if not ann or not ann.get("status"):
+                return
+            st = self.state
+            last = st.news_log[-1].get("text") if st.news_log else None
+            if ann["status"] == last:
+                return
+            st.news_log = (st.news_log or [])[-199:] + [{
+                "at": _now().isoformat(timespec="seconds"),
+                "text": ann["status"],
+                "kind": ann.get("status_kind") or "",
+            }]
+            save_state(st)
+            self._state_mtime = os.path.getmtime(st.state_path)
+        except Exception:
+            pass
 
     def _record_reset_events(self) -> None:
         """Record quota windows ACTUALLY resetting (used% big drop).

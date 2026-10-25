@@ -74,6 +74,9 @@ class WatcherState:
     credit_events: list[dict[str, Any]] = field(default_factory=list)
     # quota windows actually observed resetting ({kind, at}; from snapshots)
     reset_events: list[dict[str, Any]] = field(default_factory=list)
+    # announcement log: appended whenever the tracker text CHANGES
+    # ({at, text, kind}); one row per distinct announcement, per day many
+    news_log: list[dict[str, Any]] = field(default_factory=list)
 
     # ------------------------------------------------------------------ io
 
@@ -120,6 +123,7 @@ def load_state(state_path: str) -> WatcherState:
             st.paused = bool(raw.get("paused", False))
             st.credit_events = list(raw.get("credit_events", []))[-20:]
             st.reset_events = list(raw.get("reset_events", []))[-20:]
+            st.news_log = list(raw.get("news_log", []))[-200:]
         except (ValueError, TypeError) as e:
             raise StateError("corrupt state file %s: %s" % (state_path, e)) from e
     return st
@@ -138,6 +142,7 @@ def save_state(st: WatcherState) -> None:
         "paused": st.paused,
         "credit_events": st.credit_events,
         "reset_events": st.reset_events,
+        "news_log": st.news_log,
     }
     tmp = st.state_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:

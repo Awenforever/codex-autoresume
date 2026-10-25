@@ -66,6 +66,15 @@ border-bottom:1px dashed var(--line);padding-bottom:5px;gap:12px}
 .kv>span:first-child{flex:none;white-space:nowrap}
 .kv>span:last-child{flex:1;min-width:0;text-align:right;white-space:normal;overflow-wrap:anywhere}
 .kv.news>span:last-child{font-size:12px;text-align:left}
+.newsbox{flex:1;min-width:0;max-height:150px;overflow-y:auto;
+background:var(--card2);border:1px solid var(--line);border-radius:10px;
+padding:8px 12px;font-size:12px;line-height:1.8;font-family:Consolas,
+"Courier New",monospace;text-align:left}
+.newsbox .nl{white-space:normal;overflow-wrap:anywhere}
+.newsbox .d{color:var(--accent);font-weight:700;margin-right:8px;flex:none}
+.hl-ok{color:var(--accent);font-weight:600}
+.hl-warn{color:var(--warn);font-weight:600}
+.hl-t{color:#7ec8ff}
 .chip{white-space:nowrap}
 .kv .ok{color:var(--accent)} .kv .bad{color:var(--danger)} .kv .eta{color:var(--warn)}
 button{background:var(--card2);border:1px solid var(--line);color:var(--fg);
@@ -258,6 +267,25 @@ for(var k=0;k<ms.length;k++){o+='<option '+((cur||"")===ms[k].id?"selected":"")+
 return o}
 function esc(s){return String(s===null||s===undefined?"":s).replace(/&/g,"&amp;")
 .replace(/</g,"&lt;").replace(/"/g,"&quot;")}
+function hlNews(t){
+var x=esc(t);
+x=x.replace(/(Landed as announced[^,.]{0,40})/gi,'<span class="hl-ok">$1</span>');
+x=x.replace(/\b(Landing|tomorrow|before)\b/gi,'<span class="hl-warn">$1</span>');
+x=x.replace(/(\d{1,2}:\d{2})\s*(AM|PM|UTC|PST|PDT|Pacific Time)?/gi,
+function(m){return '<span class="hl-t">'+m+'</span>'});
+return x}
+function newsBox(s){
+ var ann=s.announcement||null;
+ var es=(s.news_log&&s.news_log.length)?s.news_log.slice().reverse():
+ (ann&&ann.status?[{at:"",text:ann.status,kind:ann.status_kind}]:[]);
+ if(!es.length){return ""}
+ var rows="";
+ for(var i=0;i<es.length;i++){
+ var e=es[i];
+ rows+='<div class="nl">'+(e.at?'<span class="d">'+fmtISO(e.at)+"</span>":"")+
+ hlNews(e.text)+"</div>"}
+ return '<div class="kv"><span>'+L("news")+'</span><span style="font-size:11px">'+
+ "× "+es.length+"</span></div>"+'<div class="newsbox">'+rows+"</div>"}
 function annRowsFor(s){
  var ann=s.announcement||null,rows="";
  var fct="--";
@@ -275,9 +303,7 @@ function annRowsFor(s){
  var e0=cand[0];
  landTxt=fmtISO(e0.at)+" · "+(e0.kind==="weekly"?L("wk"):L("card"))}
  rows+=kvRow(L("landed"),'<b class="ok">'+esc(landTxt)+"</b>");
- if(ann&&ann.status_short){rows+='<div class="kv news"><span>'+L("news")+
- '</span><span><b style="font-weight:500" title="'+esc(ann.status||"")+'">'+
- esc(ann.status_short)+"</b></span></div>"}
+ rows+=newsBox(s)
  return rows}
 function refresh(){
 return api("/api/status").then(function(s){
@@ -508,15 +534,23 @@ class ControlApi:
         snap = d._snapshot
         quota = None
         if snap:
-            from .usage import eta_epoch, estimate_ratio
+            import time as _time
+            from .usage import eta_epoch, estimate_ratio, simulate_weekly_eta
             samples = getattr(d, "_usage_samples", [])
             eta_p, rate_p, _ = eta_epoch(samples, 1, 3600)
-            # weekly drain is gated by the 5h window: cap the measured rate
-            # at (100% / 5h) * ratio  (ratio = weekly%/primary% per token)
-            ratio = estimate_ratio(samples)
-            cap = (20.0 * ratio) if ratio else 20.0
-            eta_s, rate_s, capped_s = eta_epoch(samples, 2, 5 * 3600,
-                                                cap_pct_per_h=cap)
+            # weekly ETA by stepping through 5h windows: within the current
+            # partial window at most (100-P)% remains; each reset opens a
+            # fresh window worth min(rate*5h, 100)% of primary; weekly rises
+            # `ratio` per primary percent
+            ratio = estimate_ratio(samples) or 1.0
+            win_sec = (snap.primary.window_duration_mins or 300) * 60
+            sim_rate = rate_p or (100.0 / (win_sec / 3600.0))
+            eta_s = simulate_weekly_eta(
+                _time.time(), snap.primary.used_percent,
+                snap.secondary.used_percent, sim_rate, ratio,
+                snap.primary.resets_at, win_sec,
+                snap.secondary.resets_at)
+            rate_s = sim_rate * ratio
             quota = {
                 "primary_used": snap.primary.used_percent,
                 "primary_reset": snap.primary.resets_at,
@@ -529,7 +563,7 @@ class ControlApi:
                 "rate_primary": round(rate_p, 2) if rate_p else None,
                 "eta_secondary": eta_s,
                 "rate_secondary": round(rate_s, 2) if rate_s else None,
-                "eta_secondary_capped": capped_s,
+                "eta_secondary_capped": False,
                 "credits_count": len(snap.reset_credits),
                 "credits_nearest_expiry": (
                     min((c.expires_at for c in snap.reset_credits
@@ -545,6 +579,7 @@ class ControlApi:
             "announcement": ann,
             "credit_events": list((st.credit_events if st else []))[-5:],
             "reset_events": list((st.reset_events if st else []))[-8:],
+            "news_log": list((st.news_log if st else []))[-60:],
             "threads": out_threads,
         }
 
