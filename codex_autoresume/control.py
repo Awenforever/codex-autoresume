@@ -146,6 +146,7 @@ input::placeholder{color:#5c666d}
 select{background:var(--card2);border:1px solid var(--line);color:var(--fg);
 border-radius:9px;padding:6px 8px;font-size:12.5px;width:126px}
 select:focus{outline:none;border-color:var(--accent)}
+select:disabled{opacity:.45;cursor:not-allowed}
 .prow{display:flex;gap:8px;align-items:center;padding:10px 0 0 17px;
 border-top:1px dashed var(--line);margin-top:10px;flex-wrap:wrap}
 .prow input{flex:1;min-width:220px}
@@ -423,7 +424,7 @@ var cq0=s.quota||{};
 var cc0=(cq0.credits_count!==undefined)?cq0.credits_count:cq0.credits;
 var cInfo=(cc0?("×"+cc0):L("noneC"));
 if(cc0&&cq0.credits_nearest_expiry){cInfo+=L("expirePfx")+fmtMDHM(cq0.credits_nearest_expiry)+")"}
-var cardSwitch='<div class="ctl tip end" data-tip="'+esc(L("tipCard"))+'">'+
+var cardSwitch='<div class="ctl">'+
 '<label class="sw"><input type="checkbox"'+(t.reset_card?" checked":"")+
 ' onchange="setT(\''+t.id+'\',{reset_card:this.checked})"><i></i></label>'+
 '<label>'+L("card")+'</label><span style="font-size:11px;color:var(--dim)">'+cInfo+"</span></div>";
@@ -434,13 +435,15 @@ promptRow='<div class="prow"><label style="font-size:12px;color:var(--dim)">'+L(
 '" placeholder="'+esc(defp)+'" onchange="setT(\''+t.id+'\',{prompt:this.value})">'+
 '<button class="btn-mini" onclick="resetPrompt(\''+t.id+'\')">'+L("resetD")+"</button></div>";
 }
-var rsel='<div class="ctl"><label>Reasoning</label><select onchange="setT(\''+t.id+
-'\',{effort:this.value})">';
+var rsel='<div class="ctl tip end" data-tip="'+esc(L("tipModel"))+
+'"><label>Reasoning</label><select'+(t.is_goal?" disabled":"")+
+' onchange="setT(\''+t.id+'\',{effort:this.value})">';
 for(var j=0;j<eff.length;j++){rsel+='<option '+((eff[j]===(t.effort||""))?"selected":"")+
 ' value="'+eff[j]+'">'+(eff[j]||L("inherit"))+"</option>"}
 rsel+="</select></div>";
-var modelCtl='<div class="ctl"><label>'+L("model")+'</label><select onchange="setT(\''+t.id+
-'\',{model:this.value})"><option '+((t.model||"")===""?"selected":"")+' value="">'+
+var modelCtl='<div class="ctl tip end" data-tip="'+esc(L("tipModel"))+
+'"><label>'+L("model")+'</label><select'+(t.is_goal?" disabled":"")+
+' onchange="setT(\''+t.id+'\',{model:this.value})"><option '+((t.model||"")===""?"selected":"")+' value="">'+
 L("inherit")+"</option>"+modelOpts(t.model)+"</select></div>";
 rows+=(i===0?dl:"")+
 '<div class="tcard '+(t.guard?"guard":"")+'">'+
