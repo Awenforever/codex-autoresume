@@ -166,11 +166,14 @@ def window_ratio(samples: list[tuple]) -> float | None:
     """
     if len(samples) < 2:
         return None
+    # segment at the last rollover of EITHER column: the 5h block refill
+    # drops primary, the weekly reset drops secondary — both poison the
+    # delta pair, so the measurement window starts after the newest one
     start = 0
     for i in range(1, len(samples)):
-        p_prev = samples[i - 1][1] or 0
-        p_cur = samples[i][1] or 0
-        if p_prev - p_cur >= 10:
+        p_prev, p_cur = samples[i - 1][1] or 0, samples[i][1] or 0
+        s_prev, s_cur = samples[i - 1][2] or 0, samples[i][2] or 0
+        if p_prev - p_cur >= 10 or s_prev - s_cur >= 10:
             start = i
     first, last = samples[start], samples[-1]
     dp = (last[1] or 0) - (first[1] or 0)

@@ -66,3 +66,11 @@ class SimulatePrimaryEtaTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_weekly_rollover_also_segments(self):
+        from codex_autoresume.usage import window_ratio
+        # the weekly reset dropped S 63->7 mid-history: the measurement
+        # window must start AFTER that drop, not after the 5h one only
+        samples = self._s((95, 63), (100, 63), (30, 7), (54, 8))
+        r = window_ratio(samples)
+        self.assertAlmostEqual(r, (8 - 7) / (54 - 30), places=3)
