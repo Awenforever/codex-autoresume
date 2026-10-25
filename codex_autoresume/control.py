@@ -71,6 +71,17 @@ background:var(--card2);border:1px solid var(--line);border-radius:10px;
 padding:8px 12px;font-size:12px;line-height:1.8;font-family:Consolas,
 "Courier New",monospace;text-align:left}
 .newsbox .nl{white-space:normal;overflow-wrap:anywhere}
+.clocks{display:flex;justify-content:center;gap:64px;padding:14px 18px 10px}
+.clockwrap{display:flex;flex-direction:column;align-items:center;gap:7px}
+.cface{width:100px;height:100px}
+.cfacebg{fill:#12181c;stroke:#242b30;stroke-width:1.5}
+.chand{stroke:#ecefef;stroke-width:3.4;stroke-linecap:round}
+.chandm{stroke:#c8d2d8;stroke-width:2.4;stroke-linecap:round}
+.chands{stroke:var(--accent);stroke-width:1.4;stroke-linecap:round;
+filter:drop-shadow(0 0 3px rgba(16,163,127,.45))}
+.cdot{fill:var(--accent)}
+.clocklbl{font-size:11px;color:var(--dim);text-align:center;line-height:1.55}
+.clocklbl b{color:var(--fg);font-weight:600;font-size:12.5px}
 .newsbox .d{color:var(--accent);font-weight:700;margin-right:8px;flex:none;
 background:#12202b;border:1px solid #1e3a4d;border-radius:6px;
 padding:0 6px;margin-right:10px}
@@ -158,6 +169,28 @@ pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,.4)}
  <button class="btn-mini" style="flex:none;min-width:44px" id="langBtn" onclick="toggleLang()">CN</button>
  <button class="btn-mini" style="flex:none" data-i18n="refresh" onclick="refresh();toast(L('refreshed'))">刷新</button>
 </header>
+<div class="card clocks">
+ <div class="clockwrap">
+  <svg class="cface" id="clkL" viewBox="0 0 100 100">
+   <circle cx="50" cy="50" r="47" class="cfacebg"/><g id="clkLt"></g>
+   <line id="clkLh" x1="50" y1="50" x2="50" y2="28" class="chand"/>
+   <line id="clkLm" x1="50" y1="50" x2="50" y2="17" class="chandm"/>
+   <line id="clkLs" x1="50" y1="57" x2="50" y2="13" class="chands"/>
+   <circle cx="50" cy="50" r="2.4" class="cdot"/>
+  </svg>
+  <div class="clocklbl" id="clkLlbl"></div>
+ </div>
+ <div class="clockwrap">
+  <svg class="cface" id="clkP" viewBox="0 0 100 100">
+   <circle cx="50" cy="50" r="47" class="cfacebg"/><g id="clkPt"></g>
+   <line id="clkPh" x1="50" y1="50" x2="50" y2="28" class="chand"/>
+   <line id="clkPm" x1="50" y1="50" x2="50" y2="17" class="chandm"/>
+   <line id="clkPs" x1="50" y1="57" x2="50" y2="13" class="chands"/>
+   <circle cx="50" cy="50" r="2.4" class="cdot"/>
+  </svg>
+  <div class="clocklbl" id="clkPlbl"></div>
+ </div>
+</div>
 <div class="card"><div class="hero" id="quota">
  <div id="ld" style="color:var(--dim);font-size:13px">加载中…</div>
 </div>
@@ -185,7 +218,7 @@ tipGuard:"打开则表示 5h 额度耗尽后自动继续任务",
 tipWeekly:"打开则表示守护开启时周额度重置后也自动继续任务",
 tipCard:"周额度耗尽且账户有官方重置卡时，自动消耗一张以继续任务",
 quotaNA:"额度快照暂不可用（网络波动），守护仍按重置时间正常工作",
-postAt:"动态发布时间",exhausted:"已耗尽",newsWin:"近 48 小时",g_usage_limited:"额度受限",g_budget_limited:"预算受限",g_active:"运行中",
+postAt:"动态发布时间",exhausted:"已耗尽",newsWin:"近 48 小时",clkLocal:"本机时间",clkPT:"太平洋时间",g_usage_limited:"额度受限",g_budget_limited:"预算受限",g_active:"运行中",
 g_paused:"已暂停",g_blocked:"受阻",g_complete:"已完成",
 goalOK:"✓ 已自动继续",uiaOK:"✓ 已点继续",writerBusy:"会话被 Codex 应用占用，切走/关闭后自动接管",quotaWait:"等待额度",
 errConn:"无法连接守护进程：",errTimeout:"请求超时（8 秒无响应）",errFail:"连接失败",
@@ -209,7 +242,7 @@ tipGuard:"On: automatically continue this thread when the 5h quota resets",
 tipWeekly:"On: also continue after the weekly quota resets (Auto-resume on)",
 tipCard:"When the weekly quota runs out, spend a reset credit to keep going",
 quotaNA:"Quota snapshot unavailable — resets are still tracked",
-postAt:"post publication time",exhausted:"Exhausted",newsWin:"last 48h",g_usage_limited:"quota-limited",g_budget_limited:"budget-limited",g_active:"active",
+postAt:"post publication time",exhausted:"Exhausted",newsWin:"last 48h",clkLocal:"Local time",clkPT:"Pacific time",g_usage_limited:"quota-limited",g_budget_limited:"budget-limited",g_active:"active",
 g_paused:"paused",g_blocked:"blocked",g_complete:"complete",
 goalOK:"✓ auto-continued",uiaOK:"✓ Continue clicked",writerBusy:"held by the Codex app; guard resumes once released",quotaWait:"waiting for quota",
 errConn:"Cannot reach guard daemon: ",errTimeout:"request timed out (8s)",
@@ -442,6 +475,43 @@ try{document.title=(LNG==="en")?"Codex Guard Console":"Codex 守护控制台"}ca
 function toggleLang(){LNG=(LNG==="zh")?"en":"zh";
 try{localStorage.setItem("cglang",LNG)}catch(e){}
 applyLang();refresh()}
+function initClk(id){
+ var g=document.getElementById(id+"t");if(!g)return;var s="";
+ for(var h=0;h<12;h++){var a=h*30*Math.PI/180,maj=h%3==0;
+ var r1=maj?37.5:41,r2=44;
+ s+='<line x1="'+(50+Math.sin(a)*r1)+'" y1="'+(50-Math.cos(a)*r1)+
+ '" x2="'+(50+Math.sin(a)*r2)+'" y2="'+(50-Math.cos(a)*r2)+
+ '" stroke="'+(maj?"#39424a":"#242b30")+'" stroke-width="'+
+ (maj?2.4:1.3)+'" stroke-linecap="round"/>'}
+ g.innerHTML=s}
+function setHands(pfx,h,m,sec){
+ var el=function(x){return document.getElementById(pfx+x)};
+ var f=function(x){el("h").setAttribute("transform","rotate("+(h%12*30+m*.5)+" 50 50)");
+ el("m").setAttribute("transform","rotate("+(m*6+sec*.1)+" 50 50)");
+ el("s").setAttribute("transform","rotate("+(sec*6)+" 50 50)")}
+ f()}
+var PT_FMT=null;try{PT_FMT=new Intl.DateTimeFormat("en-US",
+ {timeZone:"America/Los_Angeles",hourCycle:"h23",hour:"2-digit",
+ minute:"2-digit",second:"2-digit",month:"2-digit",day:"2-digit"})}catch(e){}
+function p2c(n){return (n<10?"0":"")+n}
+function clockTick(){
+ var d=new Date();
+ setHands("clkL",d.getHours(),d.getMinutes(),d.getSeconds());
+ var ll=document.getElementById("clkLlbl");
+ if(ll)ll.innerHTML="<b>"+p2c(d.getHours())+":"+p2c(d.getMinutes())+":"+
+ p2c(d.getSeconds())+"</b> · "+p2c(d.getMonth()+1)+"-"+p2c(d.getDate())+
+ "<br>"+L("clkLocal");
+ if(PT_FMT){try{
+ var pa={},fpa=PT_FMT.formatToParts(d);
+ for(var i=0;i<fpa.length;i++){pa[fpa[i].type]=fpa[i].value}
+ var H=+pa.hour%24;
+ setHands("clkP",H,+pa.minute,+pa.second);
+ var pl=document.getElementById("clkPlbl");
+ if(pl)pl.innerHTML="<b>"+p2c(H)+":"+p2c(pa.minute)+":"+p2c(pa.second)+
+ "</b> · "+pa.month+"-"+pa.day+"<br>"+L("clkPT");
+ }catch(e){}}
+}
+initClk("clkL");initClk("clkP");clockTick();setInterval(clockTick,1000);
 applyLang();refresh();setInterval(refresh,15000);
 document.addEventListener("visibilitychange",function(){
 if(!document.hidden){refresh()}});
