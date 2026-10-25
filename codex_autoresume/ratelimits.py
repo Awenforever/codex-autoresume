@@ -479,9 +479,10 @@ def goal_continue(codex_bin: str, thread_id: str, model: str | None = None,
                 client._rpc("thread/settings/update", params)
             except RateLimitError as e:
                 import logging
-                logging.getLogger("codex-autoresume").warning(
-                    "thread/settings/update failed (%s); continuing goal "
-                    "with existing thread settings", e)
+                logging.getLogger("codex-autoresume").info(
+                    "model/effort override skipped (%s); the desktop app "
+                    "holds the thread, so the goal continues with its own "
+                    "settings", str(e)[:140])
         try:
             result = client._rpc("thread/goal/set", {
                 "threadId": thread_id, "status": "active", "origin": origin})
