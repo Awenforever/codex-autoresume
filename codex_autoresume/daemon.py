@@ -188,9 +188,11 @@ class Daemon:
         for gid in goal_threads:
             t = self.state.thread(gid)
             t.is_goal = True
-            if t.manual and not t.tracked:
+            if t.manual and (not t.tracked or t.last_kind == ""):
                 t.tracked = True
-                log.info("re-armed user-guarded goal thread %s", gid[:8])
+                t.last_kind = "goal_limited"
+                log.info("re-armed user-guarded goal thread %s (status "
+                         "parked again)", gid[:8])
 
         # re-derive wake times for tracked threads every tick (config may
         # change; snapshot reset times may arrive later)

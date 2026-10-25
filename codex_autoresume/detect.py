@@ -85,7 +85,11 @@ def goal_events(goals: list[dict],
                 thread_id=g["thread_id"],
                 kind="goal_limited",
                 reset_at=None,       # goal rows carry no reset time; turns do
-                source="goal",
+                # per-thread+status source: a goal re-parking after a resume
+                # (e.g. blocked by model capacity) is a NEW transition and
+                # must emit again; a static "goal" source would be deduped
+                # away forever after the first sighting
+                source="goal:%s:%s" % (g["thread_id"][:8], g.get("status")),
                 detail="goal status=%s objective=%.120s" % (
                     g.get("status"), str(g.get("objective") or "")),
                 occurred_at=occurred,
