@@ -149,20 +149,25 @@ def _pacific_local(text: str) -> str | None:
 # publication timestamp (authoritative, straight from the tracker)
 _POST_RE = re.compile(
     r'<time class="cx-post-t" datetime="([^"]+)"[^>]*>.*?'
-    r'<blockquote class="cx-quote"[^>]*>\s*<p[^>]*>(.*?)</p>',
+    r'<blockquote class="cx-quote"[^>]*cite="([^"]*)"[^>]*>\s*<p[^>]*>(.*?)</p>',
     re.S)
+_PENDING_ID_RE = re.compile(r'data-pending-id="([^"]+)"')
 
 _LOCAL_NOTE = re.compile(r"（本机[^）]*）")
 
 
-def forecast_epoch(text: str) -> int | None:
-    """The Pacific clock in an upcoming announcement -> unix epoch.
+def forecast_epoch(text: str, posted_iso: str | None = None) -> int | None:
+    """A Pacific clock in an announcement -> unix epoch.
 
-    "Landing tomorrow before 10am PST" is the poster's own frame (Tibo
-    posts in Pacific time); return the absolute instant so the panel can
-    render it in the reader's machine timezone.
+    The poster's frame is Pacific time, so every anchor is Pacific:
+    "tomorrow" means the day AFTER THE POST (in Pacific), and a bare
+    clock time that has already passed when the post went out means its
+    NEXT occurrence ("by midnight PST" posted 20:40 = 00:00 that night).
     """
-    m = _PACIFIC_CLOCK.search(text or "")
+    # midnight/noon carry no digits for the clock regex
+    t = re.sub(r"(\bmidnight\b|midnight)", "12:00 am", text or "", flags=re.IGNORECASE)
+    t = re.sub(r"(\bnoon\b|noon)", "12:00 pm", t, flags=re.IGNORECASE)
+    m = _PACIFIC_CLOCK.search(t)
     if not m:
         return None
     prefix, h, mi, ampm, zone = m.groups()
@@ -176,13 +181,27 @@ def forecast_epoch(text: str) -> int | None:
                 hour = 0
         if hour > 23:
             return None
-        base = datetime.now(timezone.utc).replace(
-            hour=hour, minute=int(mi or 0), second=0, microsecond=0)
+        if posted_iso:
+            try:
+                post_utc = datetime.fromisoformat(
+                    posted_iso.replace("Z", "+00:00"))
+            except ValueError:
+                post_utc = None
+        else:
+            post_utc = None
+        if post_utc is None:
+            post_utc = datetime.now(timezone.utc)
+        offset = _pacific_offset_hours(post_utc)
+        post_pt = post_utc + timedelta(hours=offset)     # PT wall clock
+        base_pt = post_pt.replace(hour=hour, minute=int(mi or 0),
+                                  second=0, microsecond=0)
         if prefix and "tomorrow" in prefix.lower():
-            base += timedelta(days=1)
+            base_pt += timedelta(days=1)
+        elif not prefix and base_pt <= post_pt:
+            base_pt += timedelta(days=1)                 # next occurrence
         # Pacific = UTC + offset (offset is negative): UTC = Pacific - offset
-        utc_instant = base - timedelta(hours=_pacific_offset_hours(base))
-        return int(utc_instant.timestamp())
+        target_utc = base_pt - timedelta(hours=offset)
+        return int(target_utc.timestamp())
     except Exception:
         return None
 
@@ -220,8 +239,8 @@ def fetch_announcement(url: str = DEFAULT_URL,
 
         posts = []
         for m in _POST_RE.finditer(html):
-            posts.append({"at": m.group(1),
-                          "text": _strip_tags(m.group(2))[:500]})
+            posts.append({"at": m.group(1), "cite": m.group(2),
+                          "text": _strip_tags(m.group(3))[:500]})
         out["posts"] = posts[:40]
 
         landed = _LANDED_RE.search(html)
@@ -237,7 +256,16 @@ def fetch_announcement(url: str = DEFAULT_URL,
             out["status"] = raw
             out["status_kind"] = "upcoming"
             out["landing"] = raw
-            out["forecast_epoch"] = forecast_epoch(raw)
+        # the forecast comes from the page's OWN pending marker
+        # (data-pending-id -> the post it cites), never from the first
+        # "Landing ..." text match, which can be a days-old post
+        pend = _PENDING_ID_RE.search(html)
+        if pend:
+            pid = pend.group(1)
+            for q in posts:
+                if pid and pid in (q.get("cite") or ""):
+                    out["forecast_epoch"] = forecast_epoch(q["text"], q["at"])
+                    break
         if out["status"]:
             out["status_short"] = _status_short(out["status"])
         out["fetched_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")

@@ -288,16 +288,10 @@ function newsBox(s){
  for(var i=0;i<es.length;i++){
  var e=es[i];
  rows+='<div class="nl">'+(e.at?'<span class="d" title="'+L("postAt")+'">'+
- fmtPostAt(e.at)+"]</span>":"")+
+ fmtPostAt(e.at)+"</span>":"")+
  hlNews(e.text)+"</div>"}
  return '<div class="kv"><span>'+L("news")+'</span><span style="font-size:11px">'+
  L("newsWin")+"</span></div>"+'<div class="newsbox" id="newsbox">'+rows+"</div>"}
-function snapAge(q){
- if(!q||!q.fetched_at)return "";
- var t=new Date(q.fetched_at);if(isNaN(t.getTime()))return "";
- var n=Math.max(0,Math.round((Date.now()-t.getTime())/1000));
- var w=(n<60)?(n+"s"):Math.round(n/60)+"min";
- return L("snapAge")+" "+w}
 function fmtPostAt(iso){
  // the poster's own wall clock: tracker authors post in Pacific time, so
  // render the post instant in America/Los_Angeles (DST-aware via Intl)
@@ -339,8 +333,7 @@ qh='<div style="flex:1;color:var(--dim);font-size:13px">'+L("quotaNA")+"</div>";
 qh='<div class="ringcol"><div class="ringrow">'+
 ring(q.primary_used,L("w5"),fmtHM(q.primary_reset))+
 ring(q.secondary_used,L("wk"),fmtMDHM(q.secondary_reset))+
-'</div><div style="font-size:11px;color:var(--dim);text-align:center" id="snapage">'+
-snapAge(q)+'</div><button class="btn-main" style="width:100%" onclick="togglePause()">'+
+'</div><button class="btn-main" style="width:100%" onclick="togglePause()">'+
 (s.paused?L("resumeAll"):L("pauseAll"))+"</button></div>"+
 '<div class="hinfo">'+
 kvRow(L("status"),'<b class="'+(q.allowed===false?"bad":"ok")+'">'+

@@ -93,18 +93,27 @@ if __name__ == "__main__":
 
 
 class ForecastEpochTest(unittest.TestCase):
-    def test_pacific_clock_to_epoch(self):
+    def test_tomorrow_anchored_to_post_date(self):
         from codex_autoresume.announcements import forecast_epoch
+        # posted 10-23 23:47 UTC (= 10-23 16:47 PT); "tomorrow 10am PST"
+        # = 10-24 10:00 PDT = 17:00 UTC
         e = forecast_epoch(
-            "Landing tomorrow before 10am PST together with a small ship.")
-        self.assertIsInstance(e, int)
-        # 10:00 Pacific (UTC-7/-8) must land at 17:00/18:00 UTC the same or
-        # next day: verify the UTC hour, not the local rendering
+            "Landing tomorrow before 10am PST together with a small ship.",
+            "2026-10-23T23:47:00Z")
         import datetime as dt
         u = dt.datetime.fromtimestamp(e, tz=dt.timezone.utc)
-        self.assertIn(u.hour, (17, 18), "UTC hour of 10am Pacific")
+        self.assertEqual((u.month, u.day, u.hour), (10, 24, 17))
+
+    def test_midnight_next_occurrence(self):
+        from codex_autoresume.announcements import forecast_epoch
+        # "By midnight PST" posted 10-24 20:40 PT (03:40 UTC): midnight
+        # already passed that morning -> that night's midnight
+        e = forecast_epoch("By midnight PST", "2026-10-25T03:40:04Z")
+        import datetime as dt
+        u = dt.datetime.fromtimestamp(e, tz=dt.timezone.utc)
+        self.assertEqual((u.month, u.day, u.hour), (10, 25, 7))
 
     def test_no_clock_returns_none(self):
         from codex_autoresume.announcements import forecast_epoch
-        self.assertIsNone(forecast_epoch("By midnight PST"))
+        self.assertIsNone(forecast_epoch("Enjoy the reset", "2026-10-25T00:00:00Z"))
         self.assertIsNone(forecast_epoch(""))
