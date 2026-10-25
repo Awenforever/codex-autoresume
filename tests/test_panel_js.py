@@ -35,3 +35,29 @@ class PanelJsSyntaxTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PanelI18nCoverageTest(unittest.TestCase):
+    """Every L("key") used in the panel must exist in BOTH language dicts."""
+
+    def test_all_keys_covered(self):
+        import re as _re
+        from codex_autoresume.control import PANEL_HTML
+        m = _re.search(r"<script>(.*)</script>", PANEL_HTML, _re.S)
+        js = m.group(1)
+        used = set(_re.findall(r'L\("([A-Za-z0-9_]+)"\)', js))
+        # parse each language dict
+        missing = []
+        for lang in ("zh", "en"):
+            m2 = _re.search(lang + r':\{(.*?)\}\}', js, _re.S)
+            assert m2, lang + " dict not found"
+            keys = set(_re.findall(r'([A-Za-z0-9_]+):"', m2.group(1)))
+            miss = sorted(used - keys - {"g_" + x for x in
+                          ("usage_limited", "budget_limited", "active",
+                           "paused", "blocked", "complete")}
+                          - {"ocMap"} if False else used - keys)
+            # g_* status keys are looked up dynamically (g_+status)
+            miss = [k for k in miss if not k.startswith("g_")]
+            missing += [lang + ":" + k for k in miss]
+        self.assertEqual(missing, [],
+                         "i18n keys used but not defined: %s" % missing)

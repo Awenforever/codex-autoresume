@@ -129,6 +129,14 @@ white-space:normal;width:220px;border:1px solid var(--line);
 box-shadow:0 8px 22px rgba(0,0,0,.45);opacity:0;pointer-events:none;
 transition:opacity .15s;z-index:9999;text-align:left}
 .tip:hover:after{opacity:1}
+.tipn{cursor:default}
+.tipn:after{content:attr(data-tip);position:absolute;bottom:calc(100% + 8px);
+left:50%;transform:translateX(-50%);background:#20272c;color:#dfe6ea;
+font-size:11.5px;line-height:1.5;padding:7px 11px;border-radius:9px;
+white-space:normal;width:220px;border:1px solid var(--line);
+box-shadow:0 8px 22px rgba(0,0,0,.45);opacity:0;pointer-events:none;
+transition:opacity .15s;z-index:9999;text-align:left}
+.tipn:hover:after{opacity:1}
 .tip.end:after{left:auto;right:-8px;transform:none}
 .tip.start:after{left:-8px;transform:none}
 .sw{position:relative;width:40px;height:22px;display:inline-block;flex:none}
@@ -226,7 +234,8 @@ tipGuard:"打开则表示 5h 额度耗尽后自动继续任务",
 tipWeekly:"打开则表示守护开启时周额度重置后也自动继续任务",
 tipCard:"周额度耗尽且账户有官方重置卡时，自动消耗一张以继续任务",
 quotaNA:"额度快照暂不可用（网络波动），守护仍按重置时间正常工作",
-postAt:"动态发布时间",exhausted:"已耗尽",newsWin:"近 48 小时",clkLocal:"本机",clkPT:"PT",g_usage_limited:"额度受限",g_budget_limited:"预算受限",g_active:"运行中",
+postAt:"动态发布时间",exhausted:"已耗尽",newsWin:"近 48 小时",clkLocal:"本机",clkPT:"PT",
+tipModel:"普通对话：立即生效。/goal 会话由桌面应用驱动，固定沿用线程自身设置，因此锁定为继承",g_usage_limited:"额度受限",g_budget_limited:"预算受限",g_active:"运行中",
 g_paused:"已暂停",g_blocked:"受阻",g_complete:"已完成",
 goalOK:"✓ 已自动继续",uiaOK:"✓ 已点继续",writerBusy:"会话被 Codex 应用占用，切走/关闭后自动接管",quotaWait:"等待额度",
 errConn:"无法连接守护进程：",errTimeout:"请求超时（8 秒无响应）",errFail:"连接失败",
@@ -250,7 +259,8 @@ tipGuard:"On: automatically continue this thread when the 5h quota resets",
 tipWeekly:"On: also continue after the weekly quota resets (Auto-resume on)",
 tipCard:"When the weekly quota runs out, spend a reset credit to keep going",
 quotaNA:"Quota snapshot unavailable — resets are still tracked",
-postAt:"post publication time",exhausted:"Exhausted",newsWin:"last 48h",clkLocal:"Local",clkPT:"PT",g_usage_limited:"quota-limited",g_budget_limited:"budget-limited",g_active:"active",
+postAt:"post publication time",exhausted:"Exhausted",newsWin:"last 48h",clkLocal:"Local",clkPT:"PT",
+tipModel:"Normal threads: applies immediately. /goal threads are driven by the desktop app, so they stay locked to their own settings",g_usage_limited:"quota-limited",g_budget_limited:"budget-limited",g_active:"active",
 g_paused:"paused",g_blocked:"blocked",g_complete:"complete",
 goalOK:"✓ auto-continued",uiaOK:"✓ Continue clicked",writerBusy:"held by the Codex app; guard resumes once released",quotaWait:"waiting for quota",
 errConn:"Cannot reach guard daemon: ",errTimeout:"request timed out (8s)",
@@ -424,7 +434,7 @@ var cq0=s.quota||{};
 var cc0=(cq0.credits_count!==undefined)?cq0.credits_count:cq0.credits;
 var cInfo=(cc0?("×"+cc0):L("noneC"));
 if(cc0&&cq0.credits_nearest_expiry){cInfo+=L("expirePfx")+fmtMDHM(cq0.credits_nearest_expiry)+")"}
-var cardSwitch='<div class="ctl">'+
+var cardSwitch='<div class="ctl tipn end" data-tip="'+esc(L("tipCard"))+'">'+
 '<label class="sw"><input type="checkbox"'+(t.reset_card?" checked":"")+
 ' onchange="setT(\''+t.id+'\',{reset_card:this.checked})"><i></i></label>'+
 '<label>'+L("card")+'</label><span style="font-size:11px;color:var(--dim)">'+cInfo+"</span></div>";
