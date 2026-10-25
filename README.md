@@ -16,7 +16,7 @@
 <a id="english"></a>
 ## English
 
-### Why Codex Guard
+### ✨ Why Codex Guard
 
 When ChatGPT's usage limit interrupts a Codex conversation — the 5-hour
 window or the weekly quota — most people just wait and re-prompt by hand.
@@ -44,7 +44,7 @@ Codex Guard does that for you, and it does it the way you would:
   measured — when something can't be measured it shows `--` instead of
   inventing a number.
 
-### 30-second start
+### 🚀 30-second start
 
 Prerequisites: Windows 10/11 · Python 3.11+ with pip · Codex app/CLI 26.x
 (codex-cli ≥ 0.16x). Install the package into the Python that is on your
@@ -67,6 +67,20 @@ Then open **http://127.0.0.1:8765** in the Codex sidebar browser (or any
 local browser) and flip **Auto-resume** on the conversations you want
 guarded. That's the whole flow — guarding is opt-in per conversation.
 
+**Or let Codex install it for you.** Codex is an agent — paste this into a
+Codex conversation and approve its commands:
+
+```text
+Install Codex Guard for me:
+1. git clone https://github.com/Awenforever/codex-autoresume.git to a temp dir
+2. cd there and run pip install .
+3. run codex plugin marketplace add <that dir>, then
+   codex plugin add codex-autoresume-guard@codex-autoresume
+4. run codex-autoresume install (a denied admin task auto-falls back), then
+   codex-autoresume doctor
+Do NOT restart my Codex app. Report the panel URL when done.
+```
+
 Uninstall:
 
 ```bash
@@ -75,7 +89,7 @@ codex plugin remove codex-autoresume-guard@codex-autoresume # plugin
 codex plugin marketplace remove codex-autoresume            # marketplace
 ```
 
-### How it works
+### ⚙️ How it works
 
 ```
 codex  ──▶  "You've hit your usage limit … try again at 1:51 PM."
@@ -98,7 +112,7 @@ verify    goal status must actually flip; counters and state persist
 Guarding is **opt-in** (per conversation, from the panel). Detection is
 read-only. The daemon runs as the current user, no administrator needed.
 
-### For AI agents / 面向 AI Agent
+### 🤖 For AI agents / 面向 AI Agent
 
 If you are an agent setting this up for a user, the whole job is four
 commands (above) plus these checks:
@@ -114,7 +128,7 @@ Strict config validation rejects unknown keys in `config.toml`. Do not
 restart the user's Codex app. Guarding is armed per conversation from the
 panel or `codex-autoresume watch <uuid|goal>`.
 
-### Configuration
+### 🧩 Configuration
 
 Optional `~/.codex-autoresume/config.toml` (copy
 [`config.example.toml`](config.example.toml); unknown keys are rejected):
@@ -133,7 +147,7 @@ reasoning_effort = ""
 port = 8765                 # the panel
 ```
 
-### CLI
+### ⌨️ CLI
 
 | Command | What it does |
 |---|---|
@@ -148,7 +162,7 @@ port = 8765                 # the panel
 | `install` / `uninstall` | register/remove the unattended runner |
 | `doctor` | environment self-check |
 
-### Troubleshooting
+### 🩺 Troubleshooting
 
 - **Panel shows `--`** — that quota/ETA is not currently measurable; it
   fills in as the daemon samples. No invented numbers, by design.
@@ -160,12 +174,12 @@ port = 8765                 # the panel
   doctor` and open an issue if a check fails.
 - **Port 8765 busy** — change `[control_api] port` in the config.
 
-### Platform support
+### 💻 Platform support
 
 Windows 10/11: everything, including UIA goal-continue. macOS/Linux: the
 daemon, CLI and panel work; goal resume uses the official API only (no UIA).
 
-### License
+### 📄 License
 
 MIT — see [LICENSE](LICENSE).
 
@@ -174,7 +188,7 @@ MIT — see [LICENSE](LICENSE).
 <a id="中文文档"></a>
 ## 中文文档
 
-### 为什么需要 Codex Guard
+### ✨ 为什么需要 Codex Guard
 
 ChatGPT 的额度限制（5 小时窗口 / 周额度）打断 Codex 任务时，多数人只能干等并手动重发。Codex Guard 替你完成这件事，而且用的是你自己的方式：
 
@@ -185,7 +199,7 @@ ChatGPT 的额度限制（5 小时窗口 / 周额度）打断 Codex 任务时，
 - **值得打开的控制面板。** 暗色主题、中英双语、双模拟时钟（本机 + 太平洋时间）、压力渐变的额度环、官方重置预告 / 实测到账 / 动态日志——挂在 `127.0.0.1:8765`，不消耗额度。
 - **私有且诚实。** 只读扫描 Codex 本地数据库 + 一次经系统代理的轻量用量轮询；无遥测、无账号、面板仅限本机。所有 ETA 均为实测——测不出来就显示 `--`，绝不编数字。
 
-### 30 秒上手
+### 🚀 30 秒上手
 
 前置：Windows 10/11 · Python 3.11+（含 pip）· Codex 26.x（codex-cli ≥ 0.16x）。请安装到 PATH 上的那个 Python。
 
@@ -202,6 +216,19 @@ codex-autoresume install                         # 4. 后台守护
 
 然后在 Codex 侧栏浏览器打开 **http://127.0.0.1:8765**，给想守护的会话打开 **守护** 开关即可——守护按会话手动开启。
 
+**或者让 Codex 自己装**：Codex 本身就是 Agent——把下面这段话粘进对话，逐条批准它执行的命令即可：
+
+```text
+帮我安装 Codex Guard：
+1. 把 https://github.com/Awenforever/codex-autoresume.git 克隆到临时目录
+2. 进该目录执行 pip install .
+3. 执行 codex plugin marketplace add <克隆目录>，
+   再执行 codex plugin add codex-autoresume-guard@codex-autoresume
+4. 执行 codex-autoresume install（提示需要管理员属正常，会自动回退），
+   最后执行 codex-autoresume doctor 自检
+不要重启我的 Codex 应用。完成后告诉我面板地址。
+```
+
 卸载：
 
 ```bash
@@ -210,7 +237,7 @@ codex plugin remove codex-autoresume-guard@codex-autoresume # 插件
 codex plugin marketplace remove codex-autoresume            # 市场
 ```
 
-### 工作原理
+### ⚙️ 工作原理
 
 ```
 codex  ──▶  "You've hit your usage limit … try again at 1:51 PM."
@@ -229,7 +256,7 @@ codex  ──▶  "You've hit your usage limit … try again at 1:51 PM."
 
 守护**按会话手动开启**（面板或 `codex-autoresume watch <uuid|goal>`）；检测只读；守护以当前用户运行，无需管理员。
 
-### 配置
+### 🧩 配置
 
 可选的 `~/.codex-autoresume/config.toml`（从
 [`config.example.toml`](config.example.toml) 复制；未知键会被拒绝）：
@@ -248,7 +275,7 @@ reasoning_effort = ""
 port = 8765                 # 面板端口
 ```
 
-### 命令
+### ⌨️ 命令
 
 | 命令 | 作用 |
 |---|---|
@@ -263,17 +290,17 @@ port = 8765                 # 面板端口
 | `install` / `uninstall` | 注册/移除无人值守运行器 |
 | `doctor` | 环境自检 |
 
-### 常见问题
+### 🩺 常见问题
 
 - **面板显示 `--`** —— 该项当前不可测（如刚重启、样本不足）；采样够了自动出现。刻意不编数字。
 - **应用里 MCP 工具缺失** —— 重装插件（`codex plugin add …`）；MCP 通过 `codex-autoresume-mcp` 命令拉起，须在 PATH 上（用同一个 Python 重跑 `pip install .`）。
 - **Codex 自动更新后** —— schema 可能漂移；跑 `codex-autoresume doctor`，异常请提 issue。
 - **8765 端口被占** —— 改配置里的 `[control_api] port`。
 
-### 平台支持
+### 💻 平台支持
 
 Windows 10/11：全部功能（含 UIA goal 继续）。macOS/Linux：守护、CLI、面板可用；goal 恢复仅走官方接口（无 UIA）。
 
-### 许可
+### 📄 许可
 
 MIT —— 见 [LICENSE](LICENSE)。
