@@ -77,11 +77,29 @@ is auto-tracked and resumed when the window resets — no `watch` needed.
 
 ## Plugin install (Codex app integration)
 
+Prerequisites: Windows 10/11, Python 3.11+ with pip (`python -m ensurepip`
+bootstraps it if missing), Codex app/CLI 26.x (codex-cli >= 0.16x). Install
+the package into the Python that is on your PATH — the plugin's MCP server
+is spawned through the `codex-autoresume-mcp` console script, so no further
+configuration is needed.
+
 ```bash
 pip install .                                    # 1. python package
 codex plugin marketplace add <path-to-repo>      # 2. local marketplace
 codex plugin add codex-autoresume-guard@codex-autoresume   # 3. the plugin
 codex-autoresume install                         # 4. background daemon + panel
+```
+
+Step 4 works without administrator rights: when the logon scheduled task is
+denied, the installer falls back to a per-user Startup-folder shortcut and
+starts the daemon immediately.
+
+Uninstall:
+
+```bash
+codex-autoresume uninstall                                  # daemon
+codex plugin remove codex-autoresume-guard@codex-autoresume # plugin
+codex plugin marketplace remove codex-autoresume            # marketplace
 ```
 
 Then open the control panel in the Codex sidebar browser:

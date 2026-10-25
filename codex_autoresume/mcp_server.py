@@ -171,5 +171,10 @@ def _send(stdout, obj: dict) -> None:
     stdout.flush()
 
 
+def main() -> int:
+    serve()
+    return 0
+
+
 if __name__ == "__main__":
     serve()
