@@ -207,8 +207,8 @@ class Daemon:
             # a parked goal with a success marker ("Continue clicked") is
             # waiting for the quota again — say so, whatever last_kind is
             # (the thread may also be tracked via turn-failure events)
-            if t.manual and t.last_outcome in ("goal_continue",
-                                               "uia_continue"):
+            if ((t.tracked or t.manual) and t.last_outcome in
+                    ("goal_continue", "uia_continue")):
                 t.last_outcome = "quota_wait"
 
         # re-derive wake times for tracked threads every tick (config may
