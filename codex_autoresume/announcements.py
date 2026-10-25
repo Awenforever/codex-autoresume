@@ -144,6 +144,14 @@ def _pacific_local(text: str) -> str | None:
         return None
 
 
+# post timeline: <time class="cx-post-t" datetime="ISO"> ... <blockquote
+# class="cx-quote"><p>TEXT</p> — every reset-related post with its own
+# publication timestamp (authoritative, straight from the tracker)
+_POST_RE = re.compile(
+    r'<time class="cx-post-t" datetime="([^"]+)"[^>]*>.*?'
+    r'<blockquote class="cx-quote"[^>]*>\s*<p[^>]*>(.*?)</p>',
+    re.S)
+
 _LOCAL_NOTE = re.compile(r"（本机[^）]*）")
 
 
@@ -160,7 +168,7 @@ def fetch_announcement(url: str = DEFAULT_URL,
     out = {"url": url, "latest_reset": None, "latest_reset_local": None,
            "status": None, "status_kind": None, "landing": None,
            "status_short": None, "upcoming_local": None,
-           "fetched_at": None}
+           "posts": [], "fetched_at": None}
     try:
         req = urllib.request.Request(url, headers={"User-Agent": UA,
                                                    "Accept": "text/html"})
@@ -177,6 +185,12 @@ def fetch_announcement(url: str = DEFAULT_URL,
                 # setting); never IP-geolocated
                 out["latest_reset_local"] = dt.astimezone().strftime(
                     "%m-%d %H:%M")
+
+        posts = []
+        for m in _POST_RE.finditer(html):
+            posts.append({"at": m.group(1),
+                          "text": _strip_tags(m.group(2))[:500]})
+        out["posts"] = posts[:40]
 
         landed = _LANDED_RE.search(html)
         upcoming = _LANDING_RE.search(html)

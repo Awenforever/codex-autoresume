@@ -42,14 +42,12 @@ class SimulateWeeklyEtaTest(unittest.TestCase):
                                   NOW + 2.5 * H, WIN)
         self.assertAlmostEqual(eta, NOW + 1.25 * H, delta=5)
 
-    def test_weekly_reset_arrives_first(self):
-        # need 50 primary-% but the partial window supplies only 20 before
-        # the weekly reset lands at the same moment -> weekly refreshes
-        # before exhaustion
-        eta = simulate_weekly_eta(NOW, 0, 50, 20.0, 1.0,
-                                  NOW + H, WIN,
-                                  secondary_reset_epoch=NOW + H)
-        self.assertIsNone(eta)
+    def test_projects_past_weekly_reset(self):
+        # need 50 primary-%; partial window supplies 20, the remaining 30
+        # land in the first fresh window -> answer spans past where the
+        # weekly reset would be (no special-casing: always give a time)
+        eta = simulate_weekly_eta(NOW, 0, 50, 20.0, 1.0, NOW + H, WIN)
+        self.assertAlmostEqual(eta, NOW + H + 1.5 * H, delta=5)
 
     def test_already_exhausted_or_missing_inputs(self):
         self.assertIsNone(simulate_weekly_eta(NOW, 0, 100, 20, 1, NOW + H, WIN))

@@ -119,7 +119,6 @@ def eta_epoch(samples: list[tuple], idx: int, window_sec: float,
 def simulate_weekly_eta(now: float, primary_used, secondary_used,
                         rate_p_pct_h: float, ratio: float,
                         primary_reset_epoch, primary_window_sec,
-                        secondary_reset_epoch=None,
                         max_windows: int = 200):
     """Weekly-exhaustion epoch by stepping through 5h windows.
 
@@ -127,8 +126,10 @@ def simulate_weekly_eta(now: float, primary_used, secondary_used,
     window the primary can still drain at most (100 - P)% before its
     reset; every reset opens a fresh window worth at most min(rate*5h,
     100)% of primary. Weekly percent rises ``ratio`` per primary percent.
-    Walk window by window until the weekly quota crosses 100%. None when
-    the weekly reset arrives first or inputs are missing.
+    Walk window by window until the weekly quota crosses 100%. The weekly
+    refresh is deliberately NOT special-cased: the answer is simply when
+    the current trajectory exhausts the weekly quota (if it refreshes
+    first, so be it — the number is still what was asked for).
     """
     if (primary_used is None or secondary_used is None
             or not rate_p_pct_h or not ratio or not primary_reset_epoch):
@@ -148,8 +149,6 @@ def simulate_weekly_eta(now: float, primary_used, secondary_used,
         need -= avail
     t = max(primary_reset_epoch, t)
     for _ in range(max_windows):
-        if secondary_reset_epoch and t >= secondary_reset_epoch:
-            return None
         avail = min(rate_p_pct_h * win_h, 100.0)
         if need <= avail:
             return t + need / rate_p_pct_h * 3600.0

@@ -71,7 +71,9 @@ background:var(--card2);border:1px solid var(--line);border-radius:10px;
 padding:8px 12px;font-size:12px;line-height:1.8;font-family:Consolas,
 "Courier New",monospace;text-align:left}
 .newsbox .nl{white-space:normal;overflow-wrap:anywhere}
-.newsbox .d{color:var(--accent);font-weight:700;margin-right:8px;flex:none}
+.newsbox .d{color:var(--accent);font-weight:700;margin-right:8px;flex:none;
+background:#12202b;border:1px solid #1e3a4d;border-radius:6px;
+padding:0 6px;margin-right:10px}
 .hl-ok{color:var(--accent);font-weight:600}
 .hl-warn{color:var(--warn);font-weight:600}
 .hl-t{color:#7ec8ff}
@@ -183,7 +185,7 @@ tipGuard:"打开则表示 5h 额度耗尽后自动继续任务",
 tipWeekly:"打开则表示守护开启时周额度重置后也自动继续任务",
 tipCard:"周额度耗尽且账户有官方重置卡时，自动消耗一张以继续任务",
 quotaNA:"额度快照暂不可用（网络波动），守护仍按重置时间正常工作",
-g_usage_limited:"额度受限",g_budget_limited:"预算受限",g_active:"运行中",
+postAt:"动态发布时间",g_usage_limited:"额度受限",g_budget_limited:"预算受限",g_active:"运行中",
 g_paused:"已暂停",g_blocked:"受阻",g_complete:"已完成",
 goalOK:"✓ 已自动继续",uiaOK:"✓ 已点继续",writerBusy:"会话被 Codex 应用占用，切走/关闭后自动接管",quotaWait:"等待额度",
 errConn:"无法连接守护进程：",errTimeout:"请求超时（8 秒无响应）",errFail:"连接失败",
@@ -207,7 +209,7 @@ tipGuard:"On: automatically continue this thread when the 5h quota resets",
 tipWeekly:"On: also continue after the weekly quota resets (Auto-resume on)",
 tipCard:"When the weekly quota runs out, spend a reset credit to keep going",
 quotaNA:"Quota snapshot unavailable — resets are still tracked",
-g_usage_limited:"quota-limited",g_budget_limited:"budget-limited",g_active:"active",
+postAt:"post publication time",g_usage_limited:"quota-limited",g_budget_limited:"budget-limited",g_active:"active",
 g_paused:"paused",g_blocked:"blocked",g_complete:"complete",
 goalOK:"✓ auto-continued",uiaOK:"✓ Continue clicked",writerBusy:"held by the Codex app; guard resumes once released",quotaWait:"waiting for quota",
 errConn:"Cannot reach guard daemon: ",errTimeout:"request timed out (8s)",
@@ -282,7 +284,8 @@ function newsBox(s){
  var rows="";
  for(var i=0;i<es.length;i++){
  var e=es[i];
- rows+='<div class="nl">'+(e.at?'<span class="d">'+fmtISO(e.at)+"</span>":"")+
+ rows+='<div class="nl">'+(e.at?'<span class="d" title="'+L("postAt")+'">['+
+ fmtISO(e.at)+"]</span>":"")+
  hlNews(e.text)+"</div>"}
  return '<div class="kv"><span>'+L("news")+'</span><span style="font-size:11px">'+
  "× "+es.length+"</span></div>"+'<div class="newsbox">'+rows+"</div>"}
@@ -548,8 +551,7 @@ class ControlApi:
             eta_s = simulate_weekly_eta(
                 _time.time(), snap.primary.used_percent,
                 snap.secondary.used_percent, sim_rate, ratio,
-                snap.primary.resets_at, win_sec,
-                snap.secondary.resets_at)
+                snap.primary.resets_at, win_sec)
             rate_s = sim_rate * ratio
             quota = {
                 "primary_used": snap.primary.used_percent,

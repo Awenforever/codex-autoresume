@@ -360,9 +360,9 @@ class Daemon:
         self._seen_credit_ids = ids
 
     def announcement(self) -> dict | None:
-        """External reset-announcement feed (cached ~15 min, best-effort)."""
+        """External reset-announcement feed (cached ~5 min, best-effort)."""
         if (self._announcement is not None
-                and time.monotonic() - self._announcement_at < 900):
+                and time.monotonic() - self._announcement_at < 300):
             return self._announcement
         from .announcements import fetch_announcement, DEFAULT_URL
         acfg = self.cfg.get("announcements", {}) or {}
@@ -484,25 +484,47 @@ class Daemon:
         return self._snapshot
 
     def _log_announcement(self, ann: dict | None) -> None:
-        """Append to news_log whenever the tracker text changes.
+        """Keep news_log in sync with the tracker's post timeline.
 
-        One entry per DISTINCT announcement (several per day are fine);
-        displayed verbatim, never truncated.
+        Each post is keyed by its OWN publication timestamp, so entries
+        carry the real announcement time (not our fetch time) and are
+        appended exactly once. Legacy entries (no key) are replaced by the
+        real timeline on the first run that parses posts.
         """
         try:
+            posts = (ann or {}).get("posts") or []
+            st = self.state
+            if posts:
+                if any(not e.get("key") for e in st.news_log) or not st.news_log:
+                    st.news_log = [{
+                        "at": p["at"], "text": p["text"],
+                        "kind": "post", "key": p["at"],
+                    } for p in posts][-199:]
+                    save_state(st)
+                    self._state_mtime = os.path.getmtime(st.state_path)
+                    return
+                known = {e.get("key") for e in st.news_log}
+                fresh = [p for p in posts if p["at"] not in known]
+                if fresh:
+                    st.news_log = (st.news_log + [
+                        {"at": p["at"], "text": p["text"],
+                         "kind": "post", "key": p["at"]}
+                        for p in fresh])[-199:]
+                    save_state(st)
+                    self._state_mtime = os.path.getmtime(st.state_path)
+                    return
+            # no posts parsed: fall back to change-detection on status
             if not ann or not ann.get("status"):
                 return
-            st = self.state
             last = st.news_log[-1].get("text") if st.news_log else None
-            if ann["status"] == last:
-                return
-            st.news_log = (st.news_log or [])[-199:] + [{
-                "at": _now().isoformat(timespec="seconds"),
-                "text": ann["status"],
-                "kind": ann.get("status_kind") or "",
-            }]
-            save_state(st)
-            self._state_mtime = os.path.getmtime(st.state_path)
+            if ann["status"] != last:
+                st.news_log = (st.news_log or [])[-199:] + [{
+                    "at": _now().isoformat(timespec="seconds"),
+                    "text": ann["status"],
+                    "kind": ann.get("status_kind") or "",
+                }]
+                save_state(st)
+                self._state_mtime = os.path.getmtime(st.state_path)
         except Exception:
             pass
 
