@@ -104,7 +104,6 @@ class TestDaemonDryRun(unittest.TestCase):
                 state_dir = "%s"
                 poll_interval_sec = 5
                 max_resumes_per_day = 5
-                grace_after_reset_sec = 0
                 jitter_sec = 0
                 server_overloaded_cooldown_sec = 0
                 [limits_probe]

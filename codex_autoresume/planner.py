@@ -166,7 +166,6 @@ def plan_for_thread(event: InterruptionEvent,
                             kind=event.kind)
 
     # --- compute the earliest wake time ------------------------------------
-    grace = g["grace_after_reset_sec"]
     jitter = random.uniform(0, g["jitter_sec"])
     candidates: list[datetime] = []
     # primary quota headroom is the ground-truth "5h 额度不为零" signal;
@@ -177,13 +176,13 @@ def plan_for_thread(event: InterruptionEvent,
         candidates.append(now)
     else:
         if event.reset_at is not None:
-            candidates.append(event.reset_at + timedelta(seconds=grace + jitter))
+            candidates.append(event.reset_at + timedelta(seconds=jitter))
         if snapshot is not None:
             nxt = snapshot.next_reset_epoch()
             if nxt:
                 candidates.append(
                     datetime.fromtimestamp(nxt).astimezone()
-                    + timedelta(seconds=grace + jitter))
+                    + timedelta(seconds=jitter))
     wake = min(candidates) if candidates else now
 
     # --- quota gate ---------------------------------------------------------
