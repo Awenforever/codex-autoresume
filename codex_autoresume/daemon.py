@@ -165,7 +165,8 @@ class Daemon:
                      [(e.thread_id[:8], e.kind) for e in events])
 
         goal_threads = {g["thread_id"] for g in codex.goals()
-                        if g.get("status") in ("usage_limited", "budget_limited")}
+                        if g.get("status") in ("usage_limited", "budget_limited",
+                                               "blocked")}
         busy = codex.busy_threads()
         snapshot = self._quota_snapshot(force=bool(self._need_snapshot()))
         self._maybe_consume_reset_card(snapshot)
@@ -691,10 +692,26 @@ class Daemon:
         from .codexenv import CodexState
         from .ratelimits import goal_continue, RateLimitError, GoalBusyError
         try:
+            floor = float(self.cfg["general"]["server_overloaded_cooldown_sec"])
+            last = t.history[-1] if t.history else None
+            if isinstance(last, dict) and last.get("at"):
+                try:
+                    from datetime import datetime as _dt
+                    age = (_now() - _dt.fromisoformat(last["at"])).total_seconds()
+                    if age < floor and last.get("kind") in (
+                            "goal_continue", "uia_continue",
+                            "goal_continue_error"):
+                        t.next_wake_iso = (_dt.fromisoformat(last["at"])
+                                           + timedelta(seconds=floor)
+                                           ).isoformat()
+                        save_state(self.state)
+                        return True
+                except ValueError:
+                    pass
             goals = {g["thread_id"]: g["status"]
                      for g in CodexState(self.codex_home).goals()}
             status = goals.get(thread_id)
-            if status not in ("usage_limited", "budget_limited"):
+            if status not in ("usage_limited", "budget_limited", "blocked"):
                 log.info("goal %s state is %r (running/paused/done); "
                          "not touching it", thread_id[:8], status)
                 t.last_kind = ""
@@ -775,7 +792,8 @@ class Daemon:
             from .codexenv import CodexState
             goals = CodexState(self.codex_home).goals()
             limited = [g["thread_id"] for g in goals
-                       if g.get("status") in ("usage_limited", "budget_limited")]
+                       if g.get("status") in ("usage_limited", "budget_limited",
+                                              "blocked")]
             if limited != [thread_id]:
                 log.info("uia resume skipped: %d limited goals (ambiguous)",
                          len(limited))
@@ -788,7 +806,7 @@ class Daemon:
             time.sleep(3)
             status = {g["thread_id"]: g.get("status")
                       for g in CodexState(self.codex_home).goals()}.get(thread_id)
-            if status in ("usage_limited", "budget_limited"):
+            if status in ("usage_limited", "budget_limited", "blocked"):
                 log.info("uia click did not flip goal %s (%s); busy",
                          thread_id[:8], status)
                 return False

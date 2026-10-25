@@ -14,7 +14,10 @@ USAGE_LIMIT_CODES = {"usageLimitExceeded", "usage_limit_exceeded",
 # retryable with a different model
 OVERLOADED_CODES = {"serverOverloaded", "server_overloaded", "ServerOverloaded"}
 # goal statuses that park a goal thread
-LIMITED_GOAL_STATUSES = {"usage_limited", "budget_limited"}
+# "blocked" is included: goals blocked by e.g. "selected model at capacity"
+# need the same auto-continue as quota-parked ones (the app shows Resume and
+# waits; nothing else recovers them unattended)
+LIMITED_GOAL_STATUSES = {"usage_limited", "budget_limited", "blocked"}
 
 
 @dataclass
