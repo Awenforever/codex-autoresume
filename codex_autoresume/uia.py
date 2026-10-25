@@ -17,8 +17,13 @@ import base64
 import json
 import subprocess
 
-# candidate accessible names for the goal bar's continue control, zh + en
-CONTINUE_NAMES = ["继续", "Continue", "恢复", "Resume"]
+# candidate accessible names for the goal bar's continue control.
+# "Resume goal" is the app's own prompt button shown when a quota window
+# has reset (most specific, checked first); the generic short names cover
+# the blocked-state bar. Matching is EXACT, so sidebar-panel buttons like
+# "恢复默认" can never collide.
+CONTINUE_NAMES = ["Resume goal", "继续目标", "恢复目标",
+                  "Resume", "Continue", "继续", "恢复"]
 
 _PROBE_PS = r'''
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
