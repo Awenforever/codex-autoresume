@@ -202,12 +202,14 @@ class Daemon:
             if t.manual and (not t.tracked or t.last_kind == ""):
                 t.tracked = True
                 t.last_kind = "goal_limited"
-                # a stale success marker ("Continue clicked") is wrong while
-                # the goal is parked waiting for the quota again
-                if t.last_outcome in ("goal_continue", "uia_continue"):
-                    t.last_outcome = "quota_wait"
                 log.info("re-armed user-guarded goal thread %s (status "
                          "parked again)", gid[:8])
+            # a parked goal with a success marker ("Continue clicked") is
+            # waiting for the quota again — say so, whatever last_kind is
+            # (the thread may also be tracked via turn-failure events)
+            if t.manual and t.last_outcome in ("goal_continue",
+                                               "uia_continue"):
+                t.last_outcome = "quota_wait"
 
         # re-derive wake times for tracked threads every tick (config may
         # change; snapshot reset times may arrive later)
