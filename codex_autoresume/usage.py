@@ -116,43 +116,23 @@ def eta_epoch(samples: list[tuple], idx: int, window_sec: float,
     return int(now + hours * 3600), rate, capped
 
 
-def simulate_weekly_eta(now: float, primary_used, secondary_used,
-                        rate_pct_h: float, t: float,
-                        primary_reset_epoch, win_sec: float = None):
-    """Weekly-exhaustion epoch by the block-cap model.
+def simulate_weekly_eta(now: float, secondary_used, t: float,
+                        win_sec: float = None):
+    """Weekly-exhaustion epoch: i = remaining / (100t) block-equivalents.
 
-    t = weekly-% consumed per 1% of 5h consumed (measured inside the
-    current block). Each 5h block consumes AT MOST 100t weekly (a full
-    block of primary). You may exhaust a block's 100% in less than 5h
-    and idle the rest — that is why t is defined per primary-% and the
-    per-block cap is 100t, not "what a 5h window consumes".
-
-    - If the remaining weekly (100 - S) fits inside what the current
-      block can still consume (t * (100 - P)), exhaustion happens in
-      this block: needs the measured burn rate.
-    - Otherwise: the current block ends at its reset having consumed
-      t * (100 - P); the remainder covers i = rest / (100t) full blocks,
-      each costing its 5h: eta = reset + 5h * i  (i may be fractional).
-
-    No fallbacks: without a measurable t (and rate, for the in-block
-    case) this returns None and the panel shows "--".
+    t = weekly-% consumed per 1% of 5h consumed (measured in-block); each
+    5h block consumes at most 100t weekly. The remaining weekly quota
+    covers i = (100 - S) / (100t) blocks (i may be fractional), each
+    costing its 5h. No rate, no reset handling — the current block's
+    unused capacity is just part of those i block-equivalents.
     """
-    if (primary_used is None or secondary_used is None
-            or not t or t <= 0):
+    if secondary_used is None or not t or t <= 0:
         return None
     if secondary_used >= 100:
         return None
-    remaining = 100.0 - secondary_used
-    wk_in_block = t * (100.0 - primary_used)
-    if remaining <= wk_in_block:
-        if not rate_pct_h:
-            return None
-        return now + (remaining / t) / rate_pct_h * 3600.0
-    if not primary_reset_epoch:
-        return None
-    i = (remaining - wk_in_block) / (100.0 * t)
+    i = (100.0 - secondary_used) / (100.0 * t)
     win_h = (win_sec or 5 * 3600) / 3600.0
-    return primary_reset_epoch + win_h * 3600.0 * i
+    return now + win_h * 3600.0 * i
 
 
 def window_ratio(samples: list[tuple]) -> float | None:
@@ -184,18 +164,15 @@ def window_ratio(samples: list[tuple]) -> float | None:
 
 
 def simulate_primary_eta(now: float, used, rate_pct_h: float,
-                         reset_epoch, win_sec: float = None):
-    """When the current 5h block hits 100% at the measured rate.
+                         reset_epoch=None, win_sec: float = None):
+    """When the current 5h quota exhausts at the CURRENT speed.
 
-    None when there is no measured rate (no assumptions) or when the
-    projection crosses the block's end (the block refills before it can
-    exhaust — there is no honest exhaustion time to give).
+    Pure projection: (100 - P) / rate. The 5h reset is NOT part of this
+    answer's semantics. None without a measured rate or when already at
+    100%.
     """
     if used is None or not rate_pct_h:
         return None
     if used >= 100:
         return None
-    eta = now + (100.0 - used) / rate_pct_h * 3600.0
-    if reset_epoch and eta > reset_epoch:
-        return None
-    return eta
+    return now + (100.0 - used) / rate_pct_h * 3600.0

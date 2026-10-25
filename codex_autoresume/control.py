@@ -577,11 +577,8 @@ class ControlApi:
             t = window_ratio(samples)
             P = snap.primary.used_percent
             S = snap.secondary.used_percent
-            eta_p = simulate_primary_eta(
-                _time.time(), P, rate_p, snap.primary.resets_at, win_sec)
-            eta_s = simulate_weekly_eta(
-                _time.time(), P, S, rate_p, t,
-                snap.primary.resets_at, win_sec)
+            eta_p = simulate_primary_eta(_time.time(), P, rate_p)
+            eta_s = simulate_weekly_eta(_time.time(), S, t, win_sec)
             rate_s = (rate_p * t) if (rate_p and t) else None
             quota = {
                 "primary_used": snap.primary.used_percent,

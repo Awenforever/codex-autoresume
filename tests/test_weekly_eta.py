@@ -1,9 +1,9 @@
-"""Weekly-exhaustion ETA: the user's block-cap model.
+"""Weekly/5h ETA: the user's exact formulas.
 
-t = weekly-% per 1% of 5h consumed (measured in-block). Each block
-consumes at most 100t weekly (a full block of primary). Remaining weekly
-covers i = rest/(100t) blocks after the current one, each costing its 5h
-(i may be fractional for the partial last block).
+Weekly: i = remaining_weekly / (100t) block-equivalents, each costing its
+5h window; eta = now + 5h * i (i fractional). No rate, no reset logic.
+5h: pure projection (100 - P) / measured_rate; the reset is NOT part of
+the semantics. No fallbacks anywhere — unmeasurable means "--".
 """
 import unittest
 
@@ -15,62 +15,42 @@ WIN = 5 * H
 
 
 class SimulateWeeklyEtaTest(unittest.TestCase):
-    def test_exhausts_inside_current_block(self):
-        # t=0.2, P=50 -> current block can still consume 10 weekly;
-        # remaining 10 <= 10 -> in-block: (10/0.2)/20 = 2.5h
-        eta = simulate_weekly_eta(NOW, 50, 90, 20.0, 0.2,
-                                  NOW + 4 * H, WIN)
-        self.assertAlmostEqual(eta, NOW + 2.5 * H, delta=5)
+    def test_fractional_blocks(self):
+        # t=0.2: each block consumes 20 weekly; 50 remaining -> 2.5 blocks
+        eta = simulate_weekly_eta(NOW, 50, 0.2, WIN)
+        self.assertAlmostEqual(eta, NOW + 2.5 * 5 * H, delta=5)
 
-    def test_spans_blocks_with_fractional_i(self):
-        # t=0.2, P=80 -> in-block capacity 4; remaining 50 > 4 ->
-        # i = 46/20 = 2.3 blocks after reset: eta = reset + 2.3*5h
-        eta = simulate_weekly_eta(NOW, 80, 50, 20.0, 0.2,
-                                  NOW + 2 * H, WIN)
-        self.assertAlmostEqual(eta, NOW + 2 * H + 2.3 * 5 * H, delta=5)
+    def test_small_remainder(self):
+        # S=95 -> 5 remaining -> 0.25 blocks -> 1.25h
+        eta = simulate_weekly_eta(NOW, 95, 0.2, WIN)
+        self.assertAlmostEqual(eta, NOW + 1.25 * H, delta=5)
 
-    def test_no_measured_t_is_none(self):
-        self.assertIsNone(
-            simulate_weekly_eta(NOW, 80, 50, 20.0, None, NOW + H, WIN))
-
-    def test_in_block_without_rate_is_none(self):
-        # in-block exhaustion needs the burn rate; no assumptions
-        self.assertIsNone(
-            simulate_weekly_eta(NOW, 50, 95, None, 0.2, NOW + H, WIN))
-
-    def test_cross_block_does_not_need_rate(self):
-        # the block-cap path is structural: reset time + t is enough
-        eta = simulate_weekly_eta(NOW, 80, 50, None, 0.2, NOW + 2 * H, WIN)
-        self.assertAlmostEqual(eta, NOW + 2 * H + 2.3 * 5 * H, delta=5)
+    def test_no_t_is_none(self):
+        self.assertIsNone(simulate_weekly_eta(NOW, 50, None, WIN))
 
     def test_already_exhausted(self):
-        self.assertIsNone(
-            simulate_weekly_eta(NOW, 50, 100, 20.0, 0.2, NOW + H, WIN))
+        self.assertIsNone(simulate_weekly_eta(NOW, 100, 0.2, WIN))
+
+    def test_t_observed_value(self):
+        # observed on 2026-10-25: t ~ 8/54 in-block
+        eta = simulate_weekly_eta(NOW, 10, 8 / 54, WIN)
+        expected = NOW + (90 / (100 * 8 / 54)) * 5 * H
+        self.assertAlmostEqual(eta, expected, delta=5)
 
 
 class SimulatePrimaryEtaTest(unittest.TestCase):
-    def test_exhausts_before_reset(self):
-        # P=22 at 20%/h -> +3.9h, reset is 3.95h away
-        eta = simulate_primary_eta(NOW, 22, 20.0, NOW + 3.95 * H, WIN)
-        self.assertAlmostEqual(eta, NOW + 3.9 * H, delta=5)
-
-    def test_crossing_reset_is_none(self):
-        # P=2 at 20%/h -> +4.9h, but the block refills at +1h: no honest
-        # exhaustion time exists for this block
-        self.assertIsNone(
-            simulate_primary_eta(NOW, 2, 20.0, NOW + H, WIN))
+    def test_pure_projection(self):
+        # P=2 at 20%/h -> +4.9h even though the block refills sooner:
+        # the reset is NOT part of this answer's semantics
+        eta = simulate_primary_eta(NOW, 2, 20.0, NOW + H, WIN)
+        self.assertAlmostEqual(eta, NOW + 4.9 * H, delta=5)
 
     def test_no_rate_is_none(self):
         self.assertIsNone(simulate_primary_eta(NOW, 22, None, NOW + H, WIN))
 
+    def test_already_exhausted(self):
+        self.assertIsNone(simulate_primary_eta(NOW, 100, 20.0, NOW + H, WIN))
+
 
 if __name__ == "__main__":
     unittest.main()
-
-    def test_weekly_rollover_also_segments(self):
-        from codex_autoresume.usage import window_ratio
-        # the weekly reset dropped S 63->7 mid-history: the measurement
-        # window must start AFTER that drop, not after the 5h one only
-        samples = self._s((95, 63), (100, 63), (30, 7), (54, 8))
-        r = window_ratio(samples)
-        self.assertAlmostEqual(r, (8 - 7) / (54 - 30), places=3)
