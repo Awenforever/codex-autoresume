@@ -1,0 +1,43 @@
+{
+  "name": "codex-autoresume-guard",
+  "version": "0.3.13",
+  "description": "Control panel: http://127.0.0.1:8765 — auto-continue Codex conversations and goals after quota resets.",
+  "author": {
+    "name": "codex-autoresume contributors",
+    "url": "https://github.com/Awenforever/codex-autoresume"
+  },
+  "license": "MIT",
+  "skills": "./skills/",
+  "mcpServers": {
+    "autoresume": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "-m",
+        "codex_autoresume.mcp_server"
+      ]
+    }
+  },
+  "interface": {
+    "displayName": "AutoResume Guard",
+    "shortDescription": "Control panel http://127.0.0.1:8765 — auto-continue conversations after usage-limit resets",
+    "longDescription": "Control panel URL: http://127.0.0.1:8765 — open it in the Codex sidebar browser (costs no quota; desktop shortcut also available after install).\n\nKeep long tasks and goals running unattended. When the ChatGPT usage limit interrupts a conversation, AutoResume Guard waits for the quota window to reset and continues it — goals via the official continue action, ordinary threads via a resume prompt — with your chosen model and reasoning effort per resume.",
+    "developerName": "codex-autoresume contributors",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "打开守护控制面板 http://127.0.0.1:8765",
+      "Enable auto-continue guarding for this conversation with model gpt-6.1-sol and high reasoning",
+      "Show my quota windows and guard status",
+      "打开守护控制面板"
+    ],
+    "brandColor": "#10A37F",
+    "composerIcon": "./assets/composerIcon.svg",
+    "logo": "./assets/logo.svg",
+    "screenshots": [],
+    "websiteURL": "https://github.com/Awenforever/codex-autoresume"
+  }
+}
