@@ -169,10 +169,39 @@ pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,.4)}
  <button class="btn-mini" style="flex:none;min-width:44px" id="langBtn" onclick="toggleLang()">CN</button>
  <button class="btn-mini" style="flex:none" data-i18n="refresh" onclick="refresh();toast(L('refreshed'))">刷新</button>
 </header>
-<div class="card"><div class="hero" id="quota">
- <div id="ld" style="color:var(--dim);font-size:13px">加载中…</div>
-</div>
-</div>
+<div class="card"><div class="hero">
+ <div class="ringcol">
+  <div class="ringrow" id="clkrow">
+   <div class="clockwrap">
+    <svg class="cface" id="clkL" viewBox="0 0 100 100">
+     <circle cx="50" cy="50" r="47" class="cfacebg"/><g id="clkLt"></g>
+     <line id="clkLh" x1="50" y1="50" x2="50" y2="28" class="chand"/>
+     <line id="clkLm" x1="50" y1="50" x2="50" y2="17" class="chandm"/>
+     <line id="clkLs" x1="50" y1="57" x2="50" y2="13" class="chands"/>
+     <circle cx="50" cy="50" r="2.4" class="cdot"/>
+    </svg>
+    <div class="clocklbl" id="clkLlbl"></div>
+   </div>
+   <div class="clockwrap">
+    <svg class="cface" id="clkP" viewBox="0 0 100 100">
+     <circle cx="50" cy="50" r="47" class="cfacebg"/><g id="clkPt"></g>
+     <line id="clkPh" x1="50" y1="50" x2="50" y2="28" class="chand"/>
+     <line id="clkPm" x1="50" y1="50" x2="50" y2="17" class="chandm"/>
+     <line id="clkPs" x1="50" y1="57" x2="50" y2="13" class="chands"/>
+     <circle cx="50" cy="50" r="2.4" class="cdot"/>
+    </svg>
+    <div class="clocklbl" id="clkPlbl"></div>
+   </div>
+  </div>
+  <div class="ringrow" id="ringrow">
+   <div style="color:var(--dim);font-size:13px">加载中…</div>
+  </div>
+  <div id="pausewrap"></div>
+ </div>
+ <div class="hinfo" id="hinfo">
+  <div style="color:var(--dim);font-size:13px" data-i18n="loading">加载中…</div>
+ </div>
+</div></div>
 <div class="sect" data-i18n="recent">近期会话</div>
 <div id="threads"></div>
 <div class="foot" id="foot"></div>
@@ -345,27 +374,30 @@ function annRowsFor(s){
 function refresh(){
 return api("/api/status").then(function(s){
 window.__s=s;
-var q=s.quota,qh="";
+var q=s.quota;
 var annRows=annRowsFor(s);
+var ringrow=document.getElementById("ringrow");
+var pausewrap=document.getElementById("pausewrap");
+var hinfo=document.getElementById("hinfo");
 if(!q){
-qh='<div style="flex:1;color:var(--dim);font-size:13px">'+L("quotaNA")+"</div>";
+ringrow.innerHTML='<div style="flex:1;color:var(--dim);font-size:13px">'+
+L("quotaNA")+"</div>";
+pausewrap.innerHTML="";
+hinfo.innerHTML="";
 }else{
-qh='<div class="ringcol"><div class="ringrow">'+
-clockFace("L")+clockFace("P")+
-'</div><div class="ringrow">'+
+ringrow.innerHTML=
 ring(q.primary_used,L("w5"),fmtHM(q.primary_reset))+
-ring(q.secondary_used,L("wk"),fmtMDHM(q.secondary_reset))+
-'</div><button class="btn-main" style="width:100%" onclick="togglePause()">'+
-(s.paused?L("resumeAll"):L("pauseAll"))+"</button></div>"+
-'<div class="hinfo">'+
+ring(q.secondary_used,L("wk"),fmtMDHM(q.secondary_reset));
+pausewrap.innerHTML='<button class="btn-main" style="width:100%" onclick="togglePause()">'+
+(s.paused?L("resumeAll"):L("pauseAll"))+"</button>";
+hinfo.innerHTML=
 kvRow(L("status"),'<b class="'+(q.allowed===false?"bad":"ok")+'">'+
 (q.allowed===false?L("limited"):q.allowed===true?L("avail"):L("unknown"))+"</b>")+
 etaRow(L("eta5"),q,"eta_primary","rate_primary")+
 etaRow(L("etaw"),q,"eta_secondary","rate_secondary","secondary_reset")+
 kvRow(L("credits"),'<b>'+fmt((q.credits_count!==undefined)?q.credits_count:q.credits)+"</b>")+
-annRows+"</div>";
+annRows;
 }
-document.getElementById("quota").innerHTML=qh;
 document.getElementById("chips").innerHTML=
 '<span class="chip '+(s.paused?"":"on")+'">'+(s.paused?L("pausedC"):L("running"))+"</span>"+
 '<span class="chip '+(s.dry_run?"dry":"on")+'">'+(s.dry_run?"DRY-RUN":"LIVE")+"</span>";
@@ -434,10 +466,9 @@ document.getElementById("threads").innerHTML=rows||
 '<div class="card empty">'+L("noThread")+"</div>";
 var nb=document.getElementById("newsbox");
 if(nb){nb.scrollTop=nb.scrollHeight}
-initClk("clkL");initClk("clkP");
 }).catch(function(e){
 var why=(e&&e.message==="timeout")?L("errTimeout"):L("errFail");
-document.getElementById("quota").innerHTML=
+document.getElementById("hinfo").innerHTML=
 '<div style="color:var(--danger);font-size:13px">'+L("errConn")+why+L("errHint")+
 "schtasks /Run /TN codex-autoresume</div>"})}
 function setT(id,o){api("/api/threads/"+id,o).then(function(){toast(L("upd"));refresh()})}
@@ -456,15 +487,6 @@ try{document.title=(LNG==="en")?"Codex Guard Console":"Codex 守护控制台"}ca
 function toggleLang(){LNG=(LNG==="zh")?"en":"zh";
 try{localStorage.setItem("cglang",LNG)}catch(e){}
 applyLang();refresh()}
-function clockFace(pfx){
- return '<div class="clockwrap"><svg class="cface" id="clk'+pfx+
- '" viewBox="0 0 100 100"><circle cx="50" cy="50" r="47" class="cfacebg"/>'+
- '<g id="clk'+pfx+'t"></g>'+
- '<line id="clk'+pfx+'h" x1="50" y1="50" x2="50" y2="28" class="chand"/>'+
- '<line id="clk'+pfx+'m" x1="50" y1="50" x2="50" y2="17" class="chandm"/>'+
- '<line id="clk'+pfx+'s" x1="50" y1="57" x2="50" y2="13" class="chands"/>'+
- '<circle cx="50" cy="50" r="2.4" class="cdot"/></svg>'+
- '<div class="clocklbl" id="clk'+pfx+'lbl"></div></div>'}
 function initClk(id){
  var g=document.getElementById(id+"t");if(!g)return;var s="";
  for(var h=0;h<12;h++){var a=h*30*Math.PI/180,maj=h%3==0;
@@ -490,7 +512,8 @@ function clockTick(){
  setHands("clkL",d.getHours(),d.getMinutes(),d.getSeconds());
  var ll=document.getElementById("clkLlbl");
  if(ll)ll.innerHTML="<b>"+p2c(d.getHours())+":"+p2c(d.getMinutes())+":"+
- p2c(d.getSeconds())+"</b> "+L("clkLocal");
+ p2c(d.getSeconds())+"</b> "+L("clkLocal")+"<br>"+
+ p2c(d.getMonth()+1)+"-"+p2c(d.getDate());
  if(PT_FMT){try{
  var pa={},fpa=PT_FMT.formatToParts(d);
  for(var i=0;i<fpa.length;i++){pa[fpa[i].type]=fpa[i].value}
@@ -498,7 +521,7 @@ function clockTick(){
  setHands("clkP",H,+pa.minute,+pa.second);
  var pl=document.getElementById("clkPlbl");
  if(pl)pl.innerHTML="<b>"+p2c(H)+":"+p2c(pa.minute)+":"+p2c(pa.second)+
- "</b> "+L("clkPT");
+ "</b> "+L("clkPT")+"<br>"+pa.month+"-"+pa.day;
  }catch(e){}}
 }
 initClk("clkL");initClk("clkP");clockTick();setInterval(clockTick,1000);
