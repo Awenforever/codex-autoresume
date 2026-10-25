@@ -117,3 +117,47 @@ foreach ($e in $found) {
         return json.loads(out)
     except Exception:
         return {"clicked": False, "detail": "no parseable result: %s" % out[:200]}
+
+
+_DEEP_PS = r"""
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+$root = [System.Windows.Automation.AutomationElement]::RootElement
+$wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children,
+    [System.Windows.Automation.Condition]::TrueCondition)
+$res = @()
+foreach ($w in $wins) {
+    $proc = "?"
+    try { $proc = (Get-Process -Id $w.Current.ProcessId -ErrorAction Stop).ProcessName } catch {}
+    if ($proc -ne "ChatGPT" -and $proc -ne "codex") { continue }
+    $stack = New-Object System.Collections.Stack
+    $stack.Push(@{el=$w; path=""})
+    while ($stack.Count -gt 0) {
+        $node = $stack.Pop()
+        $kids = $node.el.FindAll([System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($k in $kids) {
+            $ct = $k.Current.ControlType.ProgrammaticName -replace "ControlType.",""
+            $nm = $k.Current.Name
+            $path = $node.path + "/" + $ct + ":" + $nm
+            if ($ct -eq "Button" -and ($nm -match "Resume|Continue|继续|恢复|Start|开始|Retry|重试")) {
+                $res += @{ kind="btn"; name=$nm; path=$path }
+            }
+            if ($nm -and ($nm -match "BLOCKED|blocked|受限|capacity|LIMITED|limit")) {
+                $res += @{ kind="txt"; name=$nm; path=$path }
+            }
+            $stack.Push(@{el=$k; path=$path})
+        }
+    }
+}
+$res | ConvertTo-Json -Compress -Depth 3
+"""
+
+
+def probe_detailed() -> list[dict]:
+    """Buttons and status texts with ancestry paths (read-only diagnostics)."""
+    out = _run_ps(_DEEP_PS, timeout=180)
+    try:
+        data = json.loads(out)
+        return data if isinstance(data, list) else [data]
+    except Exception:
+        return []
