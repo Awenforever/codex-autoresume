@@ -220,7 +220,7 @@ noThread:"暂无近期会话——在 Codex 里打开一个对话后刷新即可
 guard:"守护",weekly:"跨周",card:"重置卡",noneC:"（无）",expirePfx:"（到期 ",
 model:"模型",inherit:"继承",prompt:"继续指令",resetD:"恢复默认",
 lastUpd:"最近",resumed:"成功恢复",times:" 次",tryPfx:"（尝试 ",trySfx:"）",
-nextChk:"下次检查",
+
 tipGuard:"打开则表示 5h 额度耗尽后自动继续任务",
 tipWeekly:"打开则表示守护开启时周额度重置后也自动继续任务",
 tipCard:"周额度耗尽且账户有官方重置卡时，自动消耗一张以继续任务",
@@ -244,7 +244,7 @@ noThread:"No recent conversations — open one in Codex, then refresh",
 guard:"Auto-resume",weekly:"Weekly",card:"Credits",noneC:"(none)",
 expirePfx:" (expires ",model:"Model",inherit:"Inherit",prompt:"Resume prompt",
 resetD:"Reset",lastUpd:"Last",resumed:"resumed",times:"×",tryPfx:" (",
-trySfx:" tries)",nextChk:"next check",
+trySfx:" tries)",
 tipGuard:"On: automatically continue this thread when the 5h quota resets",
 tipWeekly:"On: also continue after the weekly quota resets (Auto-resume on)",
 tipCard:"When the weekly quota runs out, spend a reset credit to keep going",
@@ -448,7 +448,7 @@ rows+=(i===0?dl:"")+
 esc((t.title||"")||String(t.id||"").slice(0,13))+"</span>"+badges+"</div>"+
 '<div class="meta">'+L("lastUpd")+" "+fmtMS(t.updated_ms)+" · "+L("resumed")+" <em>"+fmt(t.resumes)+
 "</em>"+L("times")+tries+
-(t.next_wake?(" · "+L("nextChk")+" "+fmtISO(t.next_wake)):"")+
+
 (ocTxt?(" · "+ocTxt):"")+"</div>"+
 '<div class="controls">'+
 '<div class="ctl tip start" data-tip="'+esc(L("tipGuard"))+'">'+
