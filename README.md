@@ -1,98 +1,71 @@
-# codex-autoresume
+# Codex Guard
 
-**Unattended auto-continue for OpenAI Codex.** When a Codex conversation or
-goal thread is interrupted because the ChatGPT usage limit (5-hour window or
-weekly quota) is exhausted, `codex-autoresume` waits for the quota window to
-reset and resumes the thread headlessly — with per-resume model and reasoning
-settings.
+<p align="center">
+  <b>Unattended auto-continue for OpenAI Codex.<br>
+  额度重置后自动继续任务 —— 无人值守的 Codex 守护。</b>
+</p>
 
-```
-codex  ──▶ "You've hit your usage limit ... try again at 1:51 PM."
-                                                        │
-codex-autoresume  ──  sleeps until 1:51 PM (+grace)  ───┘
-        │  verifies quota via `codex app-server` (ordinaryUsageAllowed)
-        ▼
-codex exec resume <thread> "Continue the task..." -m <model> -c model_reasoning_effort=<effort>
-```
+<p align="center">
+  <a href="#english">English</a> · <a href="#中文文档">中文文档</a> ·
+  <a href="#for-ai-agents--面向-ai-agent">For AI Agents</a> ·
+  License: MIT · Platform: Windows 10/11 · Panel: <code>http://127.0.0.1:8765</code>
+</p>
 
-Works with both the **Codex desktop app** (Windows/macOS) and the **Codex
-CLI** — anything that stores state under `~/.codex` (sqlite layout, Codex
->= 0.15x / app 26.x).
+---
 
-[中文说明](README.zh-CN.md)
+<a id="english"></a>
+## English
 
-## Features
+### Why Codex Guard
 
-- **Detects** usage-limit interruptions by watching Codex's local state
-  databases (read-only): failed turns carrying `codexErrorInfo:
-  "usageLimitExceeded"` / `"serverOverloaded"`, and goal threads parked in
-  `usage_limited` / `budget_limited` state.
-- **Parses the reset time** embedded in the error ("try again at 1:51 PM"
-  for the 5-hour window, "Oct 27th, 2026 3:38 PM" for the weekly window) and
-  schedules the resume for `reset + grace + jitter`.
-- **Verifies recovery** through `codex app-server` → `account/rateLimits/read`
-  and gates on the documented `ordinaryUsageAllowed` flag (never resumes into
-  a still-exhausted window).
-- **Resumes headlessly** via `codex exec resume <thread-id>` (or
-  `codex queue` to deliver into the open desktop app), applying **per-resume
-  model / reasoning-effort overrides** — globally, per thread, or rotated
-  from a fallback chain when the model is at capacity.
-- **Weekly quota support (opt-in)**: when the weekly window is the thing that
-  ran out, the watcher can wait the multi-day reset out (`weekly_resume`).
-- **Reset-credit visibility**: `codex-autoresume limits` prints both windows
-  plus any pending rate-limit reset credits (the "bonus" grants).
-- **Safety rails**: per-thread and global daily resume budgets, cooldowns,
-  busy-thread guard (never injects into a turn that is still running),
-  single-instance lock, parking after repeated failures, and full history in
-  a JSON state file.
-- **Cross-platform**: pure Python 3.11+ stdlib, no dependencies. Installs as
-  a Windows scheduled task (logon), macOS LaunchAgent, or systemd user unit —
-  no administrator rights needed.
+When ChatGPT's usage limit interrupts a Codex conversation — the 5-hour
+window or the weekly quota — most people just wait and re-prompt by hand.
+Codex Guard does that for you, and it does it the way you would:
 
-## Quick start
+- **Truly unattended.** Detects the interruption, waits for the quota
+  window, resumes the thread — for ordinary conversations *and* `/goal`
+  threads. Survives daemon restarts; every resume is verified.
+- **Goals continue the official way.** When the desktop app holds the
+  thread, Guard clicks the app's own **Resume goal** button through UI
+  Automation (exactly your click); when it doesn't, it uses the official
+  `thread/goal/set` API. It **never** injects fake chat messages.
+- **Per-resume model & reasoning.** Each conversation can pin its own
+  model and reasoning effort for every automatic resume, or inherit.
+- **Weekly quota guard + reset credits.** Optionally keeps a goal alive
+  across the weekly reset, and can spend an official reset credit
+  automatically when the weekly quota runs dry (opt-in per thread).
+- **A control panel worth opening.** Dark, bilingual (CN/EN), dual
+  analog clocks (local + Pacific), pressure-colored quota rings, the
+  official reset forecast / observed landing / news log — served on
+  `127.0.0.1:8765`, costs no quota.
+- **Private and honest by design.** Reads Codex's local databases
+  read-only, one lightweight usage HTTP poll through your system proxy,
+  no telemetry, no accounts, localhost-only panel. Every ETA shown is
+  measured — when something can't be measured it shows `--` instead of
+  inventing a number.
+
+### 30-second start
+
+Prerequisites: Windows 10/11 · Python 3.11+ with pip · Codex app/CLI 26.x
+(codex-cli ≥ 0.16x). Install the package into the Python that is on your
+PATH.
 
 ```bash
 git clone https://github.com/Awenforever/codex-autoresume.git
 cd codex-autoresume
-
-# run from the checkout...
-python -m codex_autoresume doctor        # environment self-check
-
-# ...or install the CLI entry point
-pip install .
-codex-autoresume doctor
-```
-
-Typical unattended setup:
-
-```bash
-codex-autoresume install                 # register the logon runner + start it
-codex-autoresume watch goal              # auto-continue the usage-limited goal thread
-codex-autoresume watch --last            # ...or the most recent conversation
-codex-autoresume status                  # what is tracked, next wake, quota snapshot
-```
-
-From then on, any thread that dies on a usage limit (while recent enough)
-is auto-tracked and resumed when the window resets — no `watch` needed.
-
-## Plugin install (Codex app integration)
-
-Prerequisites: Windows 10/11, Python 3.11+ with pip (`python -m ensurepip`
-bootstraps it if missing), Codex app/CLI 26.x (codex-cli >= 0.16x). Install
-the package into the Python that is on your PATH — the plugin's MCP server
-is spawned through the `codex-autoresume-mcp` console script, so no further
-configuration is needed.
-
-```bash
 pip install .                                    # 1. python package
 codex plugin marketplace add <path-to-repo>      # 2. local marketplace
-codex plugin add codex-autoresume-guard@codex-autoresume   # 3. the plugin
-codex-autoresume install                         # 4. background daemon + panel
+codex plugin add codex-autoresume-guard@codex-autoresume   # 3. plugin
+codex-autoresume install                         # 4. background daemon
 ```
 
-Step 4 works without administrator rights: when the logon scheduled task is
-denied, the installer falls back to a per-user Startup-folder shortcut and
-starts the daemon immediately.
+Step 4 needs no administrator: when the logon scheduled task is denied, the
+installer falls back to a per-user Startup-folder shortcut and starts the
+daemon immediately.
+
+Then open **http://127.0.0.1:8765** in the Codex sidebar browser (or any
+local browser) and flip **Auto-resume** on the conversations you want
+guarded. That's the whole flow — guarding is opt-in per conversation.
 
 Uninstall:
 
@@ -102,118 +75,205 @@ codex plugin remove codex-autoresume-guard@codex-autoresume # plugin
 codex plugin marketplace remove codex-autoresume            # marketplace
 ```
 
-Then open the control panel in the Codex sidebar browser:
-**http://127.0.0.1:8765** (costs no quota). Once the repo is published,
-step 2 becomes `codex plugin marketplace add
-https://github.com/Awenforever/codex-autoresume` — same everything else.
+### How it works
 
-## Commands
+```
+codex  ──▶  "You've hit your usage limit … try again at 1:51 PM."
+                                        │
+detect    read-only scan of ~/.codex    │  goal parked? turn failed?
+          (sqlite + goals db)           │
+        ▼                               │
+plan      block model: wait for the 5h  │  resume when quota headroom
+          window; weekly tracked across │  shows — no grace, no fake
+          blocks via measured t-ratio   │  numbers, `--` when unknown
+        ▼                               │
+resume    /goal  → thread/goal/set (official API), or the app's own
+          "Resume goal" button via UIA when the app holds the writer
+          thread  → `codex exec resume` with your model/effort,
+          falling back to the app queue
+        ▼
+verify    goal status must actually flip; counters and state persist
+```
+
+Guarding is **opt-in** (per conversation, from the panel). Detection is
+read-only. The daemon runs as the current user, no administrator needed.
+
+### For AI agents / 面向 AI Agent
+
+If you are an agent setting this up for a user, the whole job is four
+commands (above) plus these checks:
+
+```bash
+codex-autoresume doctor        # every line should say [ok]
+codex plugin list              # codex-autoresume-guard: installed, enabled
+curl http://127.0.0.1:8765/api/status   # JSON with quota + threads
+```
+
+Do **not** hand-edit `~/.codex-autoresume/state.json` (the daemon owns it).
+Strict config validation rejects unknown keys in `config.toml`. Do not
+restart the user's Codex app. Guarding is armed per conversation from the
+panel or `codex-autoresume watch <uuid|goal>`.
+
+### Configuration
+
+Optional `~/.codex-autoresume/config.toml` (copy
+[`config.example.toml`](config.example.toml); unknown keys are rejected):
+
+```toml
+[general]
+poll_interval_sec = 50      # daemon heartbeat
+weekly_resume = "off"       # off | per-thread | all
+
+[resume]
+mode = "exec"               # "queue" delivers into the desktop app instead
+model = ""                  # "" keeps each thread's own model
+reasoning_effort = ""
+
+[control_api]
+port = 8765                 # the panel
+```
+
+### CLI
 
 | Command | What it does |
 |---|---|
 | `daemon [--once] [-v]` | run the watcher loop (foreground) |
-| `status` | tracked threads, next wake times, quota snapshot |
+| `status` | tracked threads, quota snapshot |
 | `watch <uuid\|goal> [--last]` | arm a thread for auto-continue |
-| `unwatch <uuid>` | stop auto-continuing a thread |
+| `unwatch <uuid>` | stop guarding a thread |
 | `pause` / `resume` | pause / unpause all auto-resumes |
-| `resume-now <uuid\|goal> [--model M] [--effort E]` | one resume attempt immediately |
+| `resume-now <uuid\|goal>` | one resume attempt immediately |
 | `goals` | list Codex goal threads and their status |
-| `limits` | quota snapshot JSON (both windows + reset credits) |
-| `install` / `uninstall` | register/remove the OS-native unattended runner |
+| `limits` | quota snapshot JSON (windows + reset credits) |
+| `install` / `uninstall` | register/remove the unattended runner |
 | `doctor` | environment self-check |
 
-## Configuration
+### Troubleshooting
 
-Config lives at `~/.codex-autoresume/config.toml` (create it from
-[`config.example.toml`](config.example.toml); every key is optional). The
-most useful bits:
+- **Panel shows `--`** — that quota/ETA is not currently measurable; it
+  fills in as the daemon samples. No invented numbers, by design.
+- **MCP tools missing in the app** — reinstall the plugin
+  (`codex plugin add …`); the MCP server is spawned via the
+  `codex-autoresume-mcp` console script, so it must be on PATH (re-run
+  `pip install .` in the same Python).
+- **Codex updated itself** — schemas may drift; run `codex-autoresume
+  doctor` and open an issue if a check fails.
+- **Port 8765 busy** — change `[control_api] port` in the config.
 
-```toml
-[resume]
-mode = "exec"              # "queue" delivers into the desktop app instead
-model = ""                 # "" keeps each thread's own model
-reasoning_effort = ""
+### Platform support
 
-[general]
-weekly_resume = "off"      # off | per-thread | all
+Windows 10/11: everything, including UIA goal-continue. macOS/Linux: the
+daemon, CLI and panel work; goal resume uses the official API only (no UIA).
 
-[threads."01a05ddb-0483-7ea1-bf01-b298b386bff8"]   # UUID prefix is enough
-model = "gpt-6.1-sol"
-reasoning_effort = "high"
-weekly_resume = true       # also resume this thread after weekly resets
+### License
+
+MIT — see [LICENSE](LICENSE).
+
+---
+
+<a id="中文文档"></a>
+## 中文文档
+
+### 为什么需要 Codex Guard
+
+ChatGPT 的额度限制（5 小时窗口 / 周额度）打断 Codex 任务时，多数人只能干等并手动重发。Codex Guard 替你完成这件事，而且用的是你自己的方式：
+
+- **真正的无人值守。** 自动检测中断、等待额度窗口、恢复任务——普通对话和 `/goal` 都支持；守护重启不丢状态，每次恢复都会验证结果。
+- **goal 用官方方式继续。** 桌面应用占用会话时，通过 UI 自动化点击应用自己的 **Resume goal** 按钮（等价于你亲手点）；未占用时走官方 `thread/goal/set` 接口。**绝不**注入伪造的聊天消息。
+- **每次恢复可指定模型与推理强度。** 每个会话可固定自动恢复时的 model / reasoning，也可继承线程设置。
+- **周额度守护 + 重置卡。** 可选择让 goal 跨越周重置继续跑；周额度耗尽且账户有官方重置卡时可自动消耗（按会话开启）。
+- **值得打开的控制面板。** 暗色主题、中英双语、双模拟时钟（本机 + 太平洋时间）、压力渐变的额度环、官方重置预告 / 实测到账 / 动态日志——挂在 `127.0.0.1:8765`，不消耗额度。
+- **私有且诚实。** 只读扫描 Codex 本地数据库 + 一次经系统代理的轻量用量轮询；无遥测、无账号、面板仅限本机。所有 ETA 均为实测——测不出来就显示 `--`，绝不编数字。
+
+### 30 秒上手
+
+前置：Windows 10/11 · Python 3.11+（含 pip）· Codex 26.x（codex-cli ≥ 0.16x）。请安装到 PATH 上的那个 Python。
+
+```bash
+git clone https://github.com/Awenforever/codex-autoresume.git
+cd codex-autoresume
+pip install .                                    # 1. 安装 python 包
+codex plugin marketplace add <仓库路径>           # 2. 添加本地市场
+codex plugin add codex-autoresume-guard@codex-autoresume   # 3. 安装插件
+codex-autoresume install                         # 4. 后台守护
 ```
 
-## Guard semantics (v0.2)
+第 4 步**不需要管理员**：登录计划任务被拒时自动回退为当前用户「启动」文件夹快捷方式，并立即启动守护。
 
-Guarding is **opt-in per conversation** — nothing is ever resumed unless you
-armed that thread:
+然后在 Codex 侧栏浏览器打开 **http://127.0.0.1:8765**，给想守护的会话打开 **守护** 开关即可——守护按会话手动开启。
 
-- Arm it via the **control panel** (`http://127.0.0.1:8765`, served by the
-  daemon), the `watch` command, or the bundled **Codex plugin** (composer
-  icon → "为当前对话开启自动继续守护" / natural language via its MCP tools).
-- A guarded conversation is continued **only when** it has no running turn,
-  its goal (if any) is not user-paused, and the 5-hour window actually has
-  quota left.
-- **Goal threads** are continued via the app's own goal-continue action
-  (`thread/goal/set`, origin `user`) — the programmatic equivalent of the
-  Continue button on the goal status bar. No message is injected. Optional
-  per-resume model/effort are applied first via `thread/settings/update`.
-- **Ordinary threads** resume via headless `codex exec resume` (falls back
-  to `codex queue` when the desktop app holds the thread; a live turn is
-  never injected into).
-- **Weekly window**: per-thread `weekly` toggle (default off). Off means
-  the weekly quota running out stops guarding **permanently** — even after
-  the weekly window recovers. On means the watcher waits out the multi-day
-  reset and continues.
-- Per-resume **model / reasoning effort** can be set globally, per thread in
-  config, or per thread from the control panel / plugin tools.
+卸载：
 
-> Note: the Codex plugin API currently allows composer icons, skills and
-> bundled MCP servers, but not arbitrary composer-bottom widgets — the
-> bundled MCP tools + panel deliver the same controls through supported
-> surfaces.
+```bash
+codex-autoresume uninstall                                  # 守护
+codex plugin remove codex-autoresume-guard@codex-autoresume # 插件
+codex plugin marketplace remove codex-autoresume            # 市场
+```
 
-## How it works
+### 工作原理
 
-1. **Detect** — every poll it opens `~/.codex/thread_history_*.sqlite` and
-   `~/.codex/goals_*.sqlite` in read-only mode and looks for new failed
-   turns / parked goals. Error payloads carry both a machine code
-   (`usageLimitExceeded`, `serverOverloaded`) and the human reset time.
-2. **Plan** — for each interruption it decides: wait until
-   `reset + grace + jitter`, respect weekly policy, budget caps, cooldowns,
-   and the busy guard.
-3. **Gate** — near the wake time it asks `codex app-server`
-   (`account/rateLimits/read`) whether ordinary usage is allowed again; the
-   protocol schema explicitly says recovery must be judged from
-   `ordinaryUsageAllowed`, not from percentages.
-4. **Resume** — `codex exec resume <thread> "<continuation prompt>"` with the
-   configured `-m` / `-c model_reasoning_effort=...` overrides. If the model
-   is at capacity it rotates through `fallback_models`; if the usage limit
-   is somehow still active it re-parses the new reset time and reschedules.
+```
+codex  ──▶  "You've hit your usage limit … try again at 1:51 PM."
+                                        │
+检测      只读扫描 ~/.codex             │  goal 停泊？turn 失败？
+        ▼                               │
+规划      块模型：等 5h 窗口；周额度按   │  额度有余量即恢复——无宽限、
+          实测 t 比例跨块累计           │  不编数字，测不出显示 `--`
+        ▼                               │
+恢复      /goal  → 官方 thread/goal/set，应用占用时经 UIA 点击
+          应用自己的 "Resume goal" 按钮
+          普通会话 → `codex exec resume`（带你的模型/强度），必要时走队列
+        ▼
+验证      goal 状态必须真实翻转；计数与状态持久化
+```
 
-Everything the watcher does is recorded in `~/.codex-autoresume/state.json`
-and `daemon.log`. The tool **never writes** to Codex's own databases.
+守护**按会话手动开启**（面板或 `codex-autoresume watch <uuid|goal>`）；检测只读；守护以当前用户运行，无需管理员。
 
-## Design decisions & prior art
+### 配置
 
-The problem is well known but not solved end-to-end by existing tools
-(survey in [`docs/DESIGN.md`](docs/DESIGN.md)): desktop-app watchdogs exist
-(`codex-auto-resume-windows`), `--last`-only CLI resumers exist
-(`codex-auto-resume`), and `unsnooze` covers interactive panes. None combine
-multi-thread tracking, goal awareness, weekly-window scheduling, verified
-quota recovery and per-resume model overrides. This project borrows its
-proven mechanisms — reset-time parsing with a failure-time anchor, the
-app-server `account/rateLimits/read` gate, probe-verified exec resume, and
-the no-admin logon-task runner — and adds the missing pieces.
+可选的 `~/.codex-autoresume/config.toml`（从
+[`config.example.toml`](config.example.toml) 复制；未知键会被拒绝）：
 
-## Requirements
+```toml
+[general]
+poll_interval_sec = 50      # 守护心跳
+weekly_resume = "off"       # off | per-thread | all
 
-- Python 3.11+ (stdlib only)
-- Codex with the sqlite state layout (`state_*.sqlite`,
-  `thread_history_*.sqlite` under `~/.codex`) — Codex app 26.x /
-  codex-cli 0.15x+
-- Logged-in Codex account (`codex login`)
+[resume]
+mode = "exec"               # "queue" 表示投递进桌面应用
+model = ""                  # "" 表示沿用各线程自己的模型
+reasoning_effort = ""
 
-## License
+[control_api]
+port = 8765                 # 面板端口
+```
 
-[MIT](LICENSE)
+### 命令
+
+| 命令 | 作用 |
+|---|---|
+| `daemon [--once] [-v]` | 运行守护循环（前台） |
+| `status` | 已守护线程与额度快照 |
+| `watch <uuid\|goal> [--last]` | 武装一个线程的自动继续 |
+| `unwatch <uuid>` | 停止守护某线程 |
+| `pause` / `resume` | 全部暂停 / 恢复 |
+| `resume-now <uuid\|goal>` | 立即尝试一次恢复 |
+| `goals` | 列出 Codex goal 线程及状态 |
+| `limits` | 额度快照 JSON（双窗口 + 重置卡） |
+| `install` / `uninstall` | 注册/移除无人值守运行器 |
+| `doctor` | 环境自检 |
+
+### 常见问题
+
+- **面板显示 `--`** —— 该项当前不可测（如刚重启、样本不足）；采样够了自动出现。刻意不编数字。
+- **应用里 MCP 工具缺失** —— 重装插件（`codex plugin add …`）；MCP 通过 `codex-autoresume-mcp` 命令拉起，须在 PATH 上（用同一个 Python 重跑 `pip install .`）。
+- **Codex 自动更新后** —— schema 可能漂移；跑 `codex-autoresume doctor`，异常请提 issue。
+- **8765 端口被占** —— 改配置里的 `[control_api] port`。
+
+### 平台支持
+
+Windows 10/11：全部功能（含 UIA goal 继续）。macOS/Linux：守护、CLI、面板可用；goal 恢复仅走官方接口（无 UIA）。
+
+### 许可
+
+MIT —— 见 [LICENSE](LICENSE)。
