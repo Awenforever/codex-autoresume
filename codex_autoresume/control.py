@@ -567,26 +567,22 @@ class ControlApi:
                                 simulate_primary_eta, window_ratio)
             samples = getattr(d, "_usage_samples", [])
             eta_p, rate_p, _ = eta_epoch(samples, 1, 3600)
-            # Codex quota model (docs + observed): the 5h block starts on
-            # first use and refills FULLY at its end (used% jumps 100->0 at
-            # reset_at); the weekly quota accumulates ACROSS blocks and is
-            # empirically ~5x the 5h cap (ratio ~0.18 on Plus). Both ETAs
-            # are stepped through blocks with the measured burn rate and a
-            # 20%/h fallback while samples accumulate (never "--").
+            # Codex quota model: 5h blocks refill fully at their end; the
+            # weekly quota accumulates across blocks. NO fallbacks: every
+            # rate/ratio is measured, or the row shows "--".
+            #   rate_p: primary %/h over the trailing hour (min 10min span)
+            #   t:      weekly-% per primary-%, measured inside the current
+            #           block (cross-block deltas are meaningless)
             win_sec = (snap.primary.window_duration_mins or 300) * 60
-            sim_rate = rate_p or (100.0 / (win_sec / 3600.0))
-            ratio = window_ratio(samples) or 0.2
+            t = window_ratio(samples)
             P = snap.primary.used_percent
             S = snap.secondary.used_percent
             eta_p = simulate_primary_eta(
-                _time.time(), P, sim_rate, snap.primary.resets_at, win_sec)
+                _time.time(), P, rate_p, snap.primary.resets_at, win_sec)
             eta_s = simulate_weekly_eta(
-                _time.time(), P, S, sim_rate, ratio,
-                snap.primary.resets_at, win_sec,
-                weekly_reset_epoch=snap.secondary.resets_at)
-            rate_s = sim_rate * ratio
-            if rate_p is None:
-                rate_p = sim_rate   # displayed as the assumption it is
+                _time.time(), P, S, rate_p, t,
+                snap.primary.resets_at, win_sec)
+            rate_s = (rate_p * t) if (rate_p and t) else None
             quota = {
                 "primary_used": snap.primary.used_percent,
                 "primary_reset": snap.primary.resets_at,
