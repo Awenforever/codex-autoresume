@@ -273,12 +273,21 @@ return o}
 function esc(s){return String(s===null||s===undefined?"":s).replace(/&/g,"&amp;")
 .replace(/</g,"&lt;").replace(/"/g,"&quot;")}
 function hlNews(t){
-var x=esc(t);
-x=x.replace(/(Landed as announced[^,.]{0,40})/gi,'<span class="hl-ok">$1</span>');
-x=x.replace(/\b(Landing|tomorrow|before)\b/gi,'<span class="hl-warn">$1</span>');
-x=x.replace(/(\d{1,2}:\d{2})\s*(AM|PM|UTC|PST|PDT|Pacific Time)?/gi,
-function(m){return '<span class="hl-t">'+m+'</span>'});
-return x}
+ // single pass over the escaped text: no nested spans, broad lexicon
+ var RE=new RegExp(
+ "(Landed as announced[^,.]{0,60})"+
+ "|\\b(Landing|upcoming|tomorrow|tonight|today|yesterday|midnight|noon|"+
+ "dawn|dusk|morning|afternoon|evening|night)\\b"+
+ "|(\\b\\d{1,2}:\\d{2}\\s*(?:am|pm)?\\b(?:\\s*(?:UTC|GMT|PST|PDT|PT|EST|EDT|CST|CDT|MST|MDT|Pacific\\s+Time))?"+
+ "|\\b\\d{1,2}\\s*(?:am|pm)\\b"+
+ "|\\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\.?\\s*\\d{1,2}\\b"+
+ "|\\b\\d{1,2}\\/d{1,2}\\b"+
+ "|\\b(?:UTC|GMT|PST|PDT|PT|EST|EDT|CST|CDT|MST|MDT)\\b"+
+ "|\\b\\d+\\s*(?:hours?|hrs?|minutes?|mins?|seconds?|secs?|days?|weeks?|months?)\\b)"+
+ "|\\b(before|after|around|about|by|until|till|next|soon|early|late)\\b","gi");
+ return String(t).replace(RE,function(m,ok,warn,tm){
+ var cls=ok?"hl-ok":(tm?"hl-t":"hl-warn");
+ return '<span class="'+cls+'">'+m+"</span>"})}
 function newsBox(s){
  var ann=s.announcement||null;
  var es=(s.news_log&&s.news_log.length)?s.news_log:
@@ -554,22 +563,30 @@ class ControlApi:
         quota = None
         if snap:
             import time as _time
-            from .usage import eta_epoch, estimate_ratio, simulate_weekly_eta
+            from .usage import (eta_epoch, simulate_weekly_eta,
+                                simulate_primary_eta, window_ratio)
             samples = getattr(d, "_usage_samples", [])
             eta_p, rate_p, _ = eta_epoch(samples, 1, 3600)
-            # weekly ETA by stepping through 5h windows: within the current
-            # partial window at most (100-P)% remains; each reset opens a
-            # fresh window worth min(rate*5h, 100)% of primary; weekly rises
-            # `ratio` per primary percent
-            ratio = estimate_ratio(samples) or 1.0
+            # Codex quota model (docs + observed): the 5h block starts on
+            # first use and refills FULLY at its end (used% jumps 100->0 at
+            # reset_at); the weekly quota accumulates ACROSS blocks and is
+            # empirically ~5x the 5h cap (ratio ~0.18 on Plus). Both ETAs
+            # are stepped through blocks with the measured burn rate and a
+            # 20%/h fallback while samples accumulate (never "--").
             win_sec = (snap.primary.window_duration_mins or 300) * 60
             sim_rate = rate_p or (100.0 / (win_sec / 3600.0))
+            ratio = window_ratio(samples) or 0.2
+            P = snap.primary.used_percent
+            S = snap.secondary.used_percent
+            eta_p = simulate_primary_eta(
+                _time.time(), P, sim_rate, snap.primary.resets_at, win_sec)
             eta_s = simulate_weekly_eta(
-                _time.time(), snap.primary.used_percent,
-                snap.secondary.used_percent, sim_rate, ratio,
+                _time.time(), P, S, sim_rate, ratio,
                 snap.primary.resets_at, win_sec,
                 weekly_reset_epoch=snap.secondary.resets_at)
             rate_s = sim_rate * ratio
+            if rate_p is None:
+                rate_p = sim_rate   # displayed as the assumption it is
             quota = {
                 "primary_used": snap.primary.used_percent,
                 "primary_reset": snap.primary.resets_at,

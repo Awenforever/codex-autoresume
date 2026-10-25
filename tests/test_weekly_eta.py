@@ -89,3 +89,41 @@ if __name__ == "__main__":
         # no reset time known: assume a fresh full window
         eta = simulate_weekly_eta(NOW, 0, 90, 20.0, 1.0, None, WIN)
         self.assertAlmostEqual(eta, NOW + 0.5 * H, delta=5)
+
+
+class WindowRatioTest(unittest.TestCase):
+    def _s(self, *rows):
+        return [(0, r[0], r[1]) for r in rows]
+
+    def test_measured_within_current_window(self):
+        from codex_autoresume.usage import window_ratio
+        # today's window: primary 0->17, weekly 0->3 (observed 2026-10-25)
+        samples = self._s((0, 0), (9, 1), (17, 3))
+        self.assertAlmostEqual(window_ratio(samples), 3 / 17, places=3)
+
+    def test_segmented_at_rollover(self):
+        from codex_autoresume.usage import window_ratio
+        # old block ended at 100; new block started: only post-rollover
+        # samples may feed the ratio (cross-block deltas are meaningless)
+        samples = self._s((95, 70), (100, 72), (0, 72), (9, 73), (17, 75))
+        r = window_ratio(samples)
+        self.assertAlmostEqual(r, (75 - 72) / 17, places=3)
+
+    def test_insufficient_signal(self):
+        from codex_autoresume.usage import window_ratio
+        self.assertIsNone(window_ratio(self._s((0, 0), (2, 0))))
+
+
+class SimulatePrimaryEtaTest(unittest.TestCase):
+    def test_exhausts_before_reset(self):
+        from codex_autoresume.usage import simulate_primary_eta
+        # P=22, 20%/h, reset in 3.95h: headroom 78 <= burnable 79 -> 3.9h
+        eta = simulate_primary_eta(NOW, 22, 20.0, NOW + 3.95 * H, WIN)
+        self.assertAlmostEqual(eta, NOW + 3.9 * H, delta=5)
+
+    def test_cannot_exhaust_refills_then_full_block(self):
+        from codex_autoresume.usage import simulate_primary_eta
+        # P=2, reset in 1h: only 20% burnable, headroom 98 -> block refills;
+        # next exhaustion = reset + full 100% at 20%/h = +5h
+        eta = simulate_primary_eta(NOW, 2, 20.0, NOW + H, WIN)
+        self.assertAlmostEqual(eta, NOW + H + 5 * H, delta=5)

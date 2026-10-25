@@ -161,3 +161,47 @@ def simulate_weekly_eta(now: float, primary_used, secondary_used,
         if wr and t >= wr:
             return wr
     return t
+
+
+def window_ratio(samples: list[tuple]) -> float | None:
+    """Weekly-% per primary-%, measured within the CURRENT 5h window.
+
+    The weekly quota accumulates across 5h blocks, so a ratio computed
+    across a block boundary is meaningless (primary drops to 0, weekly
+    does not). Segment the samples at the last primary rollover (a drop
+    of >= 10 points) and require a primary rise of >= 3 points inside the
+    segment. Empirically ~0.18 on a Plus plan (weekly cap ~5x the 5h cap).
+    """
+    if len(samples) < 2:
+        return None
+    start = 0
+    for i in range(1, len(samples)):
+        p_prev = samples[i - 1][1] or 0
+        p_cur = samples[i][1] or 0
+        if p_prev - p_cur >= 10:
+            start = i
+    first, last = samples[start], samples[-1]
+    dp = (last[1] or 0) - (first[1] or 0)
+    ds = (last[2] or 0) - (first[2] or 0)
+    if dp >= 3 and ds > 0:
+        return ds / dp
+    return None
+
+
+def simulate_primary_eta(now: float, used, rate_pct_h: float,
+                         reset_epoch, win_sec: float):
+    """When the CURRENT 5h window hits 100%, per the block model.
+
+    A block that cannot reach 100 before its end refills instead — the
+    next exhaustion is then a full block of max burn after the reset.
+    """
+    if used is None or not rate_pct_h:
+        return None
+    if used >= 100:
+        return None
+    span = max(reset_epoch - now, 0.0)
+    if (100.0 - used) <= rate_pct_h * span / 3600.0:
+        return now + (100.0 - used) / rate_pct_h * 3600.0
+    if not reset_epoch:
+        return None
+    return reset_epoch + (100.0 / rate_pct_h) * 3600.0
