@@ -176,7 +176,7 @@ tipCard:"周额度耗尽且账户有官方重置卡时，自动消耗一张以�
 quotaNA:"额度快照暂不可用（网络波动），守护仍按重置时间正常工作",
 g_usage_limited:"额度受限",g_budget_limited:"预算受限",g_active:"运行中",
 g_paused:"已暂停",g_blocked:"受阻",g_complete:"已完成",
-goalOK:"✓ 已自动继续",writerBusy:"会话被 Codex 应用占用，切走/关闭后自动接管",quotaWait:"等待额度",
+goalOK:"✓ 已自动继续",uiaOK:"✓ 已点继续",writerBusy:"会话被 Codex 应用占用，切走/关闭后自动接管",quotaWait:"等待额度",
 errConn:"无法连接守护进程：",errTimeout:"请求超时（8 秒无响应）",errFail:"连接失败",
 errHint:"。请点右上角「刷新」重试；若反复失败，启动：",
 upd:"已更新",restored:"已恢复默认指令",pauseOK:"守护已暂停",resumeOK:"守护已恢复",
@@ -200,7 +200,7 @@ tipCard:"When the weekly quota runs out, spend a reset credit to keep going",
 quotaNA:"Quota snapshot unavailable — resets are still tracked",
 g_usage_limited:"quota-limited",g_budget_limited:"budget-limited",g_active:"active",
 g_paused:"paused",g_blocked:"blocked",g_complete:"complete",
-goalOK:"✓ auto-continued",writerBusy:"held by the Codex app; guard resumes once released",quotaWait:"waiting for quota",
+goalOK:"✓ auto-continued",uiaOK:"✓ Continue clicked",writerBusy:"held by the Codex app; guard resumes once released",quotaWait:"waiting for quota",
 errConn:"Cannot reach guard daemon: ",errTimeout:"request timed out (8s)",
 errFail:"connection failed",
 errHint:". Click Refresh (top-right); if it persists start: ",
@@ -320,7 +320,7 @@ var badges=(t.is_goal?'<span class="badge goal">GOAL</span>':"")+
 (t.goal_status?'<span class="badge gstat">'+esc(gstat(t.goal_status))+"</span>":"");
 var tries=(t.attempts&&t.attempts>t.resumes)?(L("tryPfx")+t.attempts+L("trySfx")):"";
 var oc=t.last_outcome;
-var ocMap={"goal_continue":"goalOK","writer_busy":"writerBusy","usage_limit":"quotaWait"};
+var ocMap={"goal_continue":"goalOK","uia_continue":"uiaOK","writer_busy":"writerBusy","usage_limit":"quotaWait"};
 var ocTxt=oc?(L(ocMap[oc]||"")!==ocMap[oc]?L(ocMap[oc]):esc(oc)):"";
 var cq0=s.quota||{};
 var cc0=(cq0.credits_count!==undefined)?cq0.credits_count:cq0.credits;

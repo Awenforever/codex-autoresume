@@ -67,6 +67,9 @@ DEFAULTS: dict[str, Any] = {
         "fallback_models": [],
         "server_overloaded_retries": 3,
         "server_overloaded_cooldown_sec": 180,
+        # when the app holds a goal thread's writer (all RPC rejected),
+        # click the app's own Continue button via UI automation
+        "uia_resume": True,
         # when true the daemon detects and plans but never invokes codex:
         # no prompts are ever sent (safe first-deployment mode)
         "dry_run": False,

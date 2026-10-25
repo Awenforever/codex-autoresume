@@ -729,10 +729,12 @@ class Daemon:
             save_state(self.state)
             return True
         except GoalBusyError:
-            # the app owns the thread right now (running turn or open
-            # conversation): stand down quietly. Back off exponentially so a
-            # held writer does not keep spawning app-servers every poll
-            # (each spawn can nudge the app's remote-control websocket).
+            # the app owns the thread: the ONLY safe move left is clicking
+            # the app's own Continue button (user-approved UI automation)
+            if self._uia_goal_continue(thread_id, t):
+                return True
+            # stand down quietly. Back off exponentially so a held writer
+            # does not keep spawning app-servers every poll.
             bo = getattr(self, "_goal_busy_backoff", None)
             if bo is None:
                 bo = self._goal_busy_backoff = {}
@@ -758,6 +760,54 @@ class Daemon:
                         thread_id[:8], e)
             save_state(self.state)
             return True   # handled: caller must not fall back to exec/queue
+
+    def _uia_goal_continue(self, thread_id: str, t) -> bool:
+        """Writer held by the app: click its own Continue button (UIA).
+
+        Only fires when exactly ONE goal is usage/budget-limited, so the
+        visible button cannot belong to a different goal. Success is
+        VERIFIED by the goal status actually flipping; a click that changes
+        nothing is treated as busy, not as a resume.
+        """
+        if not self.cfg["general"].get("uia_resume", True):
+            return False
+        try:
+            from .codexenv import CodexState
+            goals = CodexState(self.codex_home).goals()
+            limited = [g["thread_id"] for g in goals
+                       if g.get("status") in ("usage_limited", "budget_limited")]
+            if limited != [thread_id]:
+                log.info("uia resume skipped: %d limited goals (ambiguous)",
+                         len(limited))
+                return False
+            from .uia import click_continue
+            res = click_continue()
+            if not res.get("clicked"):
+                log.info("uia Continue not clickable: %s", res.get("detail"))
+                return False
+            time.sleep(3)
+            status = {g["thread_id"]: g.get("status")
+                      for g in CodexState(self.codex_home).goals()}.get(thread_id)
+            if status in ("usage_limited", "budget_limited"):
+                log.info("uia click did not flip goal %s (%s); busy",
+                         thread_id[:8], status)
+                return False
+            t.append_history({"at": _now().isoformat(), "kind": "uia_continue",
+                              "ok": True, "detail": str(res.get("detail"))[:200]})
+            t.success_resumes += 1
+            t.last_outcome = "uia_continue"
+            t.fail_streak = 0
+            t.last_kind = ""
+            t.next_wake_iso = None
+            getattr(self, "_goal_busy_backoff", {}).pop(thread_id, None)
+            log.info("goal %s resumed via the app's own Continue button (%s)",
+                     thread_id[:8], res.get("detail"))
+            self._notify(thread_id, "uia_continue")
+            save_state(self.state)
+            return True
+        except Exception:
+            log.exception("uia continue failed")
+            return False
 
     def _record(self, thread_id: str, outcome: ResumeOutcome, model: str | None) -> None:
         t = self.state.thread(thread_id)
