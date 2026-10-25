@@ -520,7 +520,7 @@ function clockTick(){
  var H=+pa.hour%24;
  setHands("clkP",H,+pa.minute,+pa.second);
  var pl=document.getElementById("clkPlbl");
- if(pl)pl.innerHTML="<b>"+p2c(H)+":"+p2c(pa.minute)+":"+p2c(pa.second)+
+ if(pl)pl.innerHTML="<b>"+p2c(H)+":"+pa.minute+":"+pa.second+
  "</b> "+L("clkPT")+"<br>"+pa.month+"-"+pa.day;
  }catch(e){}}
 }
@@ -663,6 +663,17 @@ class ControlApi:
             eta_p = simulate_primary_eta(_time.time(), P, rate_p)
             eta_s = simulate_weekly_eta(_time.time(), S, t, win_sec)
             rate_s = (rate_p * t) if (rate_p and t) else None
+            # weekly ETA retention: while the 5h block is exhausted nothing
+            # burns, so t is unmeasurable — freeze the last valid value
+            # instead of dropping to "--". If the weekly quota is itself
+            # exhausted, both projections are meaningless: "--".
+            if S is not None and S >= 100:
+                eta_p = None
+                eta_s = None
+            elif eta_s is not None:
+                st.last_weekly_eta = eta_s
+            elif P is not None and P >= 100 and S is not None and S < 100:
+                eta_s = st.last_weekly_eta
             quota = {
                 "primary_used": snap.primary.used_percent,
                 "primary_reset": snap.primary.resets_at,

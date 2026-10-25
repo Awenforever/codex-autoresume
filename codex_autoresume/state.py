@@ -82,6 +82,10 @@ class WatcherState:
     # blind the rollover detector to a reset that happened across it
     prev_primary_pct: int | None = None
     prev_secondary_pct: int | None = None
+    # last valid weekly-exhaustion ETA: frozen on the panel while the 5h
+    # block is exhausted (nothing burns, so t is unmeasurable) and the
+    # weekly quota is not itself exhausted
+    last_weekly_eta: float | None = None
 
     # ------------------------------------------------------------------ io
 
@@ -131,6 +135,7 @@ def load_state(state_path: str) -> WatcherState:
             st.news_log = list(raw.get("news_log", []))[-200:]
             st.prev_primary_pct = raw.get("prev_primary_pct")
             st.prev_secondary_pct = raw.get("prev_secondary_pct")
+            st.last_weekly_eta = raw.get("last_weekly_eta")
         except (ValueError, TypeError) as e:
             raise StateError("corrupt state file %s: %s" % (state_path, e)) from e
     return st
@@ -163,6 +168,7 @@ def _save_state_locked(st: WatcherState) -> None:
         "news_log": st.news_log,
         "prev_primary_pct": st.prev_primary_pct,
         "prev_secondary_pct": st.prev_secondary_pct,
+        "last_weekly_eta": st.last_weekly_eta,
     }
     tmp = st.state_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
