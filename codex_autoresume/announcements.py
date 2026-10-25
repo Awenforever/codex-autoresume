@@ -173,7 +173,10 @@ def fetch_announcement(url: str = DEFAULT_URL,
             out["latest_reset"] = raw
             dt = parse_full_utc(raw)
             if dt:
-                out["latest_reset_local"] = dt.strftime("%m-%d %H:%M") + " UTC"
+                # machine timezone (datetime.astimezone reads the OS
+                # setting); never IP-geolocated
+                out["latest_reset_local"] = dt.astimezone().strftime(
+                    "%m-%d %H:%M")
 
         landed = _LANDED_RE.search(html)
         upcoming = _LANDING_RE.search(html)

@@ -50,7 +50,7 @@ class TestAnnouncements(unittest.TestCase):
         self.assertIn("Landed as announced", out["status"])
         # display text stays VERBATIM (no machine-tz conversion)
         self.assertNotIn("本机", out["status"])
-        self.assertIn("UTC", out["latest_reset_local"])
+        self.assertRegex(out["latest_reset_local"], r"^\d{2}-\d{2} \d{2}:\d{2}$")
         self.assertIsNone(out["landing"])
 
     def test_parse_upcoming(self):

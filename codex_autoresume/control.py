@@ -162,7 +162,7 @@ var I18N={
 zh:{title:"Codex 守护",sub:"额度重置后自动继续任务 · 仅本机",refresh:"刷新",loading:"加载中…",
 w5:"5 小时窗口",wk:"周窗口",reset:"重置",status:"使用状态",limited:"额度受限",
 avail:"✓ 可正常使用",unknown:"状态未知",eta5:"5h 额度预估耗尽",etaw:"周额度预估耗尽",
-capped:"已按5h窗口上限折算",credits:"重置赠送",forecast:"预告",landed:"到账",
+credits:"重置赠送",forecast:"预告",landed:"到账",
 news:"动态",pauseAll:"⏸ 全部暂停",resumeAll:"▶ 全部继续",running:"守护运行中",
 pausedC:"已暂停",recent:"近期会话",
 noThread:"暂无近期会话——在 Codex 里打开一个对话后刷新即可",
@@ -185,7 +185,7 @@ footer:"打开方式：侧栏输入 <code>http://127.0.0.1:8765</code>（推荐�
 en:{title:"Codex Guard",sub:"Auto-continue conversations after quota resets",
 refresh:"Refresh",loading:"Loading…",w5:"5h window",wk:"Weekly",reset:"Resets",
 status:"Usage",limited:"Limited",avail:"✓ Available",unknown:"Unknown",
-eta5:"5h quota ETA",etaw:"Weekly quota ETA",capped:"(capped by 5h window)",
+eta5:"5h quota ETA",etaw:"Weekly quota ETA",
 credits:"Reset credits",forecast:"Forecast",landed:"Landed",
 news:"News",pauseAll:"⏸ Pause all",resumeAll:"▶ Resume all",
 running:"Watching",pausedC:"Paused",recent:"Recent conversations",
@@ -210,8 +210,8 @@ footer:"Open: type <code>http://127.0.0.1:8765</code> in the sidebar (recommende
 function L(k){var d=I18N[LNG]||I18N.zh;var v=d[k];
 return (v===undefined)?(I18N.zh[k]||k):v}
 function p2(n){return (n<10?"0":"")+n}
-function u(d){return p2(d.getUTCMonth()+1)+"-"+p2(d.getUTCDate())+" "+
-p2(d.getUTCHours())+":"+p2(d.getUTCMinutes())}
+function u(d){return p2(d.getMonth()+1)+"-"+p2(d.getDate())+" "+
+p2(d.getHours())+":"+p2(d.getMinutes())}
 function fmtHM(sec){if(!sec)return "";return u(new Date(sec*1000))}
 function fmtMDHM(sec){if(!sec)return "";return u(new Date(sec*1000))}
 function fmtISO(iso){if(!iso)return "";
@@ -239,12 +239,12 @@ function ring(pct,label,reset){
  '" stroke-dasharray="'+C+'" stroke-dashoffset="'+off+'"/></svg>'+
  '<div class="pct" style="color:'+col+'">'+fmt(pct)+"%</div></div>"+
  '<div class="ringlbl">'+label+"</div>"+
- (reset?'<div class="ringreset">'+L("reset")+" "+reset+" UTC</div>":"")+"</div>"}
+ (reset?'<div class="ringreset">'+L("reset")+" "+reset+"</div>":"")+"</div>"}
 function etaRow(label,q,etaK,rateK,cappedK){
  var eta=q[etaK],rate=q[rateK];
- var b=(eta?('<b class="eta">'+fmtMDHM(eta)+" UTC</b>"):"<b>--</b>");
+ var b=(eta?('<b class="eta">'+fmtMDHM(eta)+"</b>"):"<b>--</b>");
  var tail=(rate?(' <span style="font-size:11px">（'+rate+"%/h）</span>"):"");
- if(cappedK&&q[cappedK]){tail+=' <span style="font-size:11px;color:var(--dim)">'+L("capped")+"</span>"}
+
  return '<div class="kv"><span>'+label+"</span><span>"+b+tail+"</span></div>"}
 function kvRow(k,v){return '<div class="kv"><span>'+k+"</span><span>"+v+"</span></div>"}
 function toast(m){var t=document.getElementById("toast");t.textContent=m;
@@ -273,7 +273,7 @@ function annRowsFor(s){
  if(cand.length){
  cand.sort(function(a,b){return String(b.at).localeCompare(String(a.at))});
  var e0=cand[0];
- landTxt=fmtISO(e0.at)+" UTC · "+(e0.kind==="weekly"?L("wk"):L("card"))}
+ landTxt=fmtISO(e0.at)+" · "+(e0.kind==="weekly"?L("wk"):L("card"))}
  rows+=kvRow(L("landed"),'<b class="ok">'+esc(landTxt)+"</b>");
  if(ann&&ann.status_short){rows+='<div class="kv news"><span>'+L("news")+
  '</span><span><b style="font-weight:500" title="'+esc(ann.status||"")+'">'+
@@ -325,7 +325,7 @@ var ocTxt=oc?(L(ocMap[oc]||"")!==ocMap[oc]?L(ocMap[oc]):esc(oc)):"";
 var cq0=s.quota||{};
 var cc0=(cq0.credits_count!==undefined)?cq0.credits_count:cq0.credits;
 var cInfo=(cc0?("×"+cc0):L("noneC"));
-if(cc0&&cq0.credits_nearest_expiry){cInfo+=L("expirePfx")+fmtMDHM(cq0.credits_nearest_expiry)+" UTC)"}
+if(cc0&&cq0.credits_nearest_expiry){cInfo+=L("expirePfx")+fmtMDHM(cq0.credits_nearest_expiry)+")"}
 var cardSwitch='<div class="ctl tip end" data-tip="'+esc(L("tipCard"))+'">'+
 '<label class="sw"><input type="checkbox"'+(t.reset_card?" checked":"")+
 ' onchange="setT(\''+t.id+'\',{reset_card:this.checked})"><i></i></label>'+
@@ -349,9 +349,9 @@ rows+=(i===0?dl:"")+
 '<div class="tcard '+(t.guard?"guard":"")+'">'+
 '<div class="thead"><span class="dot"></span><span class="ttl">'+
 esc((t.title||"")||String(t.id||"").slice(0,13))+"</span>"+badges+"</div>"+
-'<div class="meta">'+L("lastUpd")+" "+fmtMS(t.updated_ms)+" UTC · "+L("resumed")+" <em>"+fmt(t.resumes)+
+'<div class="meta">'+L("lastUpd")+" "+fmtMS(t.updated_ms)+" · "+L("resumed")+" <em>"+fmt(t.resumes)+
 "</em>"+L("times")+tries+
-(t.next_wake?(" · "+L("nextChk")+" "+fmtISO(t.next_wake)+" UTC"):"")+
+(t.next_wake?(" · "+L("nextChk")+" "+fmtISO(t.next_wake)):"")+
 (ocTxt?(" · "+ocTxt):"")+"</div>"+
 '<div class="controls">'+
 '<div class="ctl tip start" data-tip="'+esc(L("tipGuard"))+'">'+
@@ -389,6 +389,9 @@ function toggleLang(){LNG=(LNG==="zh")?"en":"zh";
 try{localStorage.setItem("cglang",LNG)}catch(e){}
 applyLang();refresh()}
 applyLang();refresh();setInterval(refresh,15000);
+document.addEventListener("visibilitychange",function(){
+if(!document.hidden){refresh()}});
+window.addEventListener("focus",function(){refresh()});
 </script></body></html>"""
 
 
