@@ -160,17 +160,18 @@ if __name__ == "__main__":
 
 
 class PanelHeaderTest(unittest.TestCase):
-    """Header chrome: icon-only refresh/lang, English default, no status chips."""
+    """Header chrome: theme + language icons only, English default, no chips."""
 
-    def test_refresh_and_lang_are_icon_buttons(self):
+    def test_header_has_theme_and_language_icons_only(self):
         from codex_autoresume.control import PANEL_HTML
         self.assertRegex(
             PANEL_HTML,
             r'<button class="btn-mini icon" id="langBtn"[^>]*>\s*<svg')
-        self.assertRegex(
-            PANEL_HTML,
-            r'<button class="btn-mini icon" id="refreshBtn"[^>]*>\s*<svg')
-        self.assertNotIn('data-i18n="refresh"', PANEL_HTML)
+        self.assertIn('id="themeBtn"', PANEL_HTML)
+        self.assertNotIn('id="refreshBtn"', PANEL_HTML)
+        self.assertNotIn('L("refresh")', PANEL_HTML)
+        self.assertNotIn('refreshed', PANEL_HTML)
+        self.assertIn('setInterval(refresh,15000)', PANEL_HTML)
 
     def test_english_is_default_language(self):
         from codex_autoresume.control import PANEL_HTML

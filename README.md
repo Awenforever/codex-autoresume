@@ -8,7 +8,29 @@
 <p align="center">
   <a href="#english">English</a> · <a href="#中文文档">中文文档</a> ·
   <a href="#for-ai-agents--面向-ai-agent">For AI Agents</a> ·
+  <a href="#screenshots--效果图">Screenshots</a> ·
   License: MIT · Platform: Windows 10/11 · Panel: <code>http://127.0.0.1:8765</code>
+</p>
+
+---
+
+<a id="screenshots--效果图"></a>
+## Screenshots / 效果图
+
+The guard panel docked in the Codex sidebar browser — dark and light.
+
+守护面板嵌在 Codex 侧栏浏览器中的样子——深色与浅色。
+
+<p align="center">
+  <img src="docs/images/panel-dark.png" width="100%"
+       alt="Codex Guard panel in the Codex sidebar, dark theme / 深色主题下嵌在 Codex 侧栏的守护面板">
+  <br><sub>Dark / 深色</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/panel-light.png" width="100%"
+       alt="Codex Guard panel in the Codex sidebar, light theme / 浅色主题下嵌在 Codex 侧栏的守护面板">
+  <br><sub>Light / 浅色</sub>
 </p>
 
 ---

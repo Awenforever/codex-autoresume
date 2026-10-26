@@ -21,6 +21,8 @@ import sys
 import urllib.error
 import urllib.request
 
+from . import __version__
+
 CONTROL_URL = "http://127.0.0.1:8765"
 
 TOOLS = [
@@ -29,7 +31,8 @@ TOOLS = [
         "description": ("Show the codex-autoresume watcher status: quota "
                         "windows, reset credits, and per-conversation guard "
                         "toggles (guard on/off, cross-week, model, "
-                        "reasoning effort)."),
+                        "reasoning effort). / 查看守护状态：额度窗口、重置赠送，"
+                        "以及每个会话的守护开关（守护、跨周、模型、推理强度）。"),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -43,28 +46,60 @@ TOOLS = [
             "quota; weekly=true also continues after weekly-limit resets "
             "(weekly=false stops permanently once the weekly quota is "
             "exhausted). model/effort apply to each automatic resume "
-            "(empty = inherit the thread's own settings)."),
+            "(empty = inherit the thread's own settings). / "
+            "配置某个 Codex 会话的自动继续守护：已知 thread_id 就传它，否则用 "
+            "title_contains 按标题匹配（例如当前对话主题里的辨识短语）。仅在会话"
+            "未运行/未暂停且 5h 窗口有余量时才会继续；weekly=true 表示周额度重置后"
+            "也继续（weekly=false 表示周额度耗尽即永久停止）；model/effort 应用于"
+            "每次自动继续（留空 = 继承会话自身设置）。"),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "thread_id": {"type": "string"},
-                "title_contains": {"type": "string"},
-                "guard": {"type": "boolean"},
-                "weekly": {"type": "boolean"},
-                "model": {"type": "string"},
-                "effort": {"type": "string",
-                           "enum": ["", "none", "minimal", "low", "medium",
-                                    "high", "xhigh"]},
+                "thread_id": {
+                    "type": "string",
+                    "description": "Thread UUID / 会话 UUID",
+                },
+                "title_contains": {
+                    "type": "string",
+                    "description": ("Distinctive phrase from the conversation "
+                                    "title / 会话标题里的辨识短语"),
+                },
+                "guard": {
+                    "type": "boolean",
+                    "description": "Enable or disable guarding / 开启或关闭守护",
+                },
+                "weekly": {
+                    "type": "boolean",
+                    "description": ("Also continue after the weekly quota "
+                                    "resets / 周额度重置后也继续"),
+                },
+                "model": {
+                    "type": "string",
+                    "description": ("Model for each automatic resume; empty = "
+                                    "inherit / 每次自动继续的模型；留空 = 继承"),
+                },
+                "effort": {
+                    "type": "string",
+                    "enum": ["", "none", "minimal", "low", "medium",
+                             "high", "xhigh"],
+                    "description": ("Reasoning effort; empty = inherit / "
+                                    "推理强度；留空 = 继承"),
+                },
             },
             "required": ["guard"],
         },
     },
     {
         "name": "autoresume_pause",
-        "description": "Pause or resume the whole codex-autoresume watcher.",
+        "description": ("Pause or resume the whole codex-autoresume watcher. / "
+                        "暂停或恢复整个守护进程。"),
         "inputSchema": {
             "type": "object",
-            "properties": {"paused": {"type": "boolean"}},
+            "properties": {"paused": {
+                "type": "boolean",
+                "description": ("Pause or resume the whole watcher / "
+                                "暂停或恢复整个守护进程"),
+            }},
             "required": ["paused"],
         },
     },
@@ -88,17 +123,22 @@ def _resolve_thread(args: dict, status: dict) -> str | dict:
         return tid
     frag = (args.get("title_contains") or "").strip().lower()
     if not frag:
-        return {"error": "provide thread_id or title_contains"}
+        return {"error": "provide thread_id or title_contains / "
+                         "请提供 thread_id 或 title_contains"}
     hits = [t for t in status.get("threads", [])
             if frag in (t.get("title") or "").lower()
             or frag in t["id"].lower()]
     if len(hits) == 1:
         return hits[0]["id"]
     if not hits:
-        return {"error": "no conversation matches %r" % args["title_contains"]}
-    return {"error": "ambiguous match (%d threads): %s" % (
-        len(hits), ", ".join((h.get("title") or h["id"][:8])[:30]
-                             for h in hits[:5]))}
+        return {"error": "no conversation matches %r / 没有匹配的会话：%r"
+                         % (args["title_contains"], args["title_contains"])}
+    return {"error": "ambiguous match (%d threads): %s / "
+                     "匹配到多个会话（%d 个）：%s" % (
+                         len(hits), ", ".join((h.get("title") or h["id"][:8])[:30]
+                                              for h in hits[:5]),
+                         len(hits), ", ".join((h.get("title") or h["id"][:8])[:30]
+                                              for h in hits[:5]))}
 
 
 def tool_call(name: str, args: dict, base: str = CONTROL_URL) -> dict:
@@ -119,11 +159,13 @@ def tool_call(name: str, args: dict, base: str = CONTROL_URL) -> dict:
         if name == "autoresume_pause":
             return _control("/api/pause",
                             {"paused": bool(args.get("paused"))}, base=base)
-        return {"error": "unknown tool %s" % name}
+        return {"error": "unknown tool %s / 未知工具 %s" % (name, name)}
     except urllib.error.URLError as e:
         return {"error": "daemon control API unreachable at %s (%s). "
                          "Start it with: schtasks /Run /TN codex-autoresume "
-                         "or `codex-autoresume daemon`" % (base, e)}
+                         "or `codex-autoresume daemon` / 无法连接守护进程：%s（%s）。"
+                         "请运行 schtasks /Run /TN codex-autoresume 或 "
+                         "`codex-autoresume daemon`" % (base, e, base, e)}
     except Exception as e:  # defensive: never crash the stdio loop
         return {"error": "%s: %s" % (type(e).__name__, e)}
 
@@ -144,7 +186,7 @@ def serve(stdin=sys.stdin.buffer, stdout=sys.stdout.buffer) -> None:
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "codex-autoresume",
-                               "version": "0.2.0"},
+                               "version": __version__},
             }
         elif method == "notifications/initialized":
             continue

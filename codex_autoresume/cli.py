@@ -299,65 +299,66 @@ def cmd_doctor(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="codex-autoresume",
-        description="Unattended auto-continue for OpenAI Codex after usage-limit resets.")
+        description="Unattended auto-continue for OpenAI Codex after usage-limit resets. / 额度重置后无人值守地自动继续 Codex 对话。")
     p.add_argument("--version", action="version", version=__version__)
-    p.add_argument("-c", "--config", help="config TOML path")
-    p.add_argument("--state-dir", help="state directory override")
+    p.add_argument("-c", "--config", help="config TOML path / 配置文件 TOML 路径")
+    p.add_argument("--state-dir", help="state directory override / 覆盖状态目录")
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("-c", "--config", help="config TOML path")
-    common.add_argument("--state-dir", help="state directory override")
+    common.add_argument("-c", "--config", help="config TOML path / 配置文件 TOML 路径")
+    common.add_argument("--state-dir", help="state directory override / 覆盖状态目录")
     sub = p.add_subparsers(dest="cmd")
 
-    d = sub.add_parser("daemon", help="run the watcher (foreground)",
+    d = sub.add_parser("daemon", help="run the watcher (foreground) / 运行守护循环（前台）",
                        parents=[common])
-    d.add_argument("--once", action="store_true", help="one tick then exit")
-    d.add_argument("-v", "--verbose", action="store_true")
+    d.add_argument("--once", action="store_true", help="one tick then exit / 只执行一轮后退出")
+    d.add_argument("-v", "--verbose", action="store_true",
+                   help="verbose logging / 输出详细日志")
     d.set_defaults(fn=cmd_daemon)
 
-    s = sub.add_parser("status", help="show tracked threads and quota",
+    s = sub.add_parser("status", help="show tracked threads and quota / 显示已守护线程与额度",
                        parents=[common])
     s.set_defaults(fn=cmd_status)
 
-    w = sub.add_parser("watch", help="arm a thread for auto-continue",
+    w = sub.add_parser("watch", help="arm a thread for auto-continue / 为一个线程开启自动继续",
                        parents=[common])
     w.add_argument("thread", nargs="?", default="",
-                   help="thread UUID, 'goal', or omit with --last")
-    w.add_argument("--last", action="store_true", help="most recent thread")
-    w.add_argument("--all", action="store_true", help="with 'goal': all goals")
-    w.add_argument("--goal", action="store_true", help="treat as goal thread")
+                   help="thread UUID, 'goal', or omit with --last / 线程 UUID、'goal'，或配合 --last 省略")
+    w.add_argument("--last", action="store_true", help="most recent thread / 最近的线程")
+    w.add_argument("--all", action="store_true", help="with 'goal': all goals / 配合 'goal'：所有 goal")
+    w.add_argument("--goal", action="store_true", help="treat as goal thread / 按 goal 线程处理")
     w.set_defaults(fn=cmd_watch)
 
-    u = sub.add_parser("unwatch", help="stop auto-continuing a thread", parents=[common])
+    u = sub.add_parser("unwatch", help="stop auto-continuing a thread / 停止守护一个线程", parents=[common])
     u.add_argument("thread")
     u.set_defaults(fn=cmd_unwatch)
 
-    pp = sub.add_parser("pause", help="pause auto-resumes", parents=[common])
+    pp = sub.add_parser("pause", help="pause auto-resumes / 暂停全部自动继续", parents=[common])
     pp.set_defaults(fn=cmd_pause)
-    pr = sub.add_parser("resume", help="unpause the watcher", parents=[common])
+    pr = sub.add_parser("resume", help="unpause the watcher / 恢复守护进程", parents=[common])
     pr.set_defaults(fn=cmd_resume_pause)
 
-    rn = sub.add_parser("resume-now", help="run one resume attempt now", parents=[common])
+    rn = sub.add_parser("resume-now", help="run one resume attempt now / 立即尝试一次继续", parents=[common])
     rn.add_argument("thread", nargs="?", default="goal",
-                    help="thread UUID or 'goal'")
-    rn.add_argument("--prompt")
-    rn.add_argument("--model")
-    rn.add_argument("--effort", help="reasoning effort")
+                    help="thread UUID or 'goal' / 线程 UUID 或 'goal'")
+    rn.add_argument("--prompt", help="resume prompt / 继续指令")
+    rn.add_argument("--model", help="model for this resume / 本次继续使用的模型")
+    rn.add_argument("--effort", help="reasoning effort / 推理强度")
     rn.set_defaults(fn=cmd_resume_now)
 
-    g = sub.add_parser("goals", help="list Codex goals", parents=[common])
+    g = sub.add_parser("goals", help="list Codex goals / 列出 Codex goal", parents=[common])
     g.set_defaults(fn=cmd_goals)
 
-    l = sub.add_parser("limits", help="print quota snapshot (JSON)", parents=[common])
+    l = sub.add_parser("limits", help="print quota snapshot (JSON) / 输出额度快照（JSON）", parents=[common])
     l.set_defaults(fn=cmd_limits)
 
-    i = sub.add_parser("install", help="install the unattended runner", parents=[common])
+    i = sub.add_parser("install", help="install the unattended runner / 安装无人值守运行器", parents=[common])
     i.add_argument("--no-state-dir", action="store_true",
-                   help="do not bake the state dir into the runner command")
+                   help="do not bake the state dir into the runner command / 不把状态目录写入运行命令")
     i.set_defaults(fn=cmd_install)
-    un = sub.add_parser("uninstall", help="remove the unattended runner", parents=[common])
+    un = sub.add_parser("uninstall", help="remove the unattended runner / 移除无人值守运行器", parents=[common])
     un.set_defaults(fn=cmd_uninstall)
 
-    doc = sub.add_parser("doctor", help="environment self-check", parents=[common])
+    doc = sub.add_parser("doctor", help="environment self-check / 环境自检", parents=[common])
     doc.set_defaults(fn=cmd_doctor)
     return p
 

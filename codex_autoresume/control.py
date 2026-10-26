@@ -209,7 +209,6 @@ pointer-events:none;box-shadow:0 6px 24px var(--shadow)}
  <div class="hright" id="chips"></div>
  <button class="btn-mini theme" id="themeBtn" data-mode="auto" onclick="cycleTheme()"><svg class="ic-auto" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.2"/><path d="M12 3.8a8.2 8.2 0 0 1 0 16.4Z" fill="currentColor" stroke="none"/></svg><svg class="ic-sun" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.1"/><path d="M12 2.9v2.2M12 18.9v2.2M2.9 12h2.2M18.9 12h2.2M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/></svg><svg class="ic-moon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20.4 14.2A8.6 8.6 0 0 1 9.8 3.6 8.6 8.6 0 1 0 20.4 14.2Z"/></svg></button>
  <button class="btn-mini icon" id="langBtn" onclick="toggleLang()" aria-label="Language"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.4"/><path d="M3.6 12h16.8M12 3.6c2.5 2.3 3.8 5.1 3.8 8.4s-1.3 6.1-3.8 8.4c-2.5-2.3-3.8-5.1-3.8-8.4s1.3-6.1 3.8-8.4Z"/></svg></button>
- <button class="btn-mini icon" id="refreshBtn" onclick="refresh();toast(L('refreshed'))" aria-label="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.49-6.01"/><path d="M20.5 3.5v5h-5"/></svg></button>
 </header>
 <div class="card"><div class="hero">
  <div class="ringcol">
@@ -236,7 +235,7 @@ pointer-events:none;box-shadow:0 6px 24px var(--shadow)}
    </div>
   </div>
   <div class="ringrow" id="ringrow">
-   <div style="color:var(--dim);font-size:13px">Loading…</div>
+   <div style="color:var(--dim);font-size:13px" data-i18n="loading">Loading…</div>
   </div>
   <div id="pausewrap"></div>
  </div>
@@ -252,13 +251,13 @@ pointer-events:none;box-shadow:0 6px 24px var(--shadow)}
 var eff=["","none","minimal","low","medium","high","xhigh"];
 var LNG="en";try{LNG=localStorage.getItem("cglang")||"en"}catch(e){}if(LNG!=="zh"&&LNG!=="en")LNG="en";
 var I18N={
-zh:{title:"Codex 守护",sub:"额度重置后自动继续任务 · 仅本机",refresh:"刷新",langTip:"语言：中文（点击切换）",loading:"加载中…",theme:"主题",themeAuto:"自动跟随系统",themeLight:"浅色",themeDark:"深色",
+zh:{title:"Codex 守护",sub:"额度重置后自动继续任务 · 仅本机",langTip:"语言：中文（点击切换）",loading:"加载中…",theme:"主题",themeAuto:"自动跟随系统",themeLight:"浅色",themeDark:"深色",
 w5:"5 小时窗口",wk:"周窗口",reset:"重置",status:"使用状态",limited:"额度受限",
 avail:"✓ 可正常使用",unknown:"状态未知",eta5:"5h 额度预估耗尽",etaw:"周额度预估耗尽",
 credits:"重置赠送",forecast:"预告",landed:"到账",
 news:"动态",pauseAll:"⏸ 全部暂停",resumeAll:"▶ 全部继续",
 recent:"近期会话",
-noThread:"暂无近期会话——在 Codex 里打开一个对话后刷新即可",
+noThread:"暂无近期会话——在 Codex 里打开一个对话，面板会自动刷新",
 guard:"守护",weekly:"跨周",card:"重置卡",noneC:"（无）",expirePfx:"（到期 ",
 model:"模型",inherit:"继承",prompt:"继续指令",resetD:"恢复默认",
 lastUpd:"最近",resumed:"成功恢复",times:" 次",tryPfx:"（尝试 ",trySfx:"）",
@@ -273,18 +272,17 @@ tipModelGoal:"/goal 会话由桌面应用驱动，固定沿用对话自身设置
 g_paused:"已暂停",g_blocked:"受阻",g_complete:"已完成",
 goalOK:"✓ 已自动继续",uiaOK:"✓ 已点继续",writerBusy:"会话被 Codex 应用占用，切走/关闭后自动接管",quotaWait:"等待额度",capacityWait:"等待模型容量",
 errConn:"无法连接守护进程：",errTimeout:"请求超时（8 秒无响应）",errFail:"连接失败",
-errHint:"。请点右上角「刷新」重试；若反复失败，启动：",
+errHint:"。面板每 15 秒自动重试；若持续失败，请确认守护进程在运行：",
 upd:"已更新",restored:"已恢复默认指令",pauseOK:"守护已暂停",resumeOK:"守护已恢复",
-refreshed:"已刷新",
 footer:"打开方式：侧栏输入 <code>http://127.0.0.1:8765</code>（推荐，不消耗额度）· 桌面快捷方式 · 完整说明见插件 README"},
 en:{title:"Codex Guard",sub:"Auto-continue conversations after quota resets",
-refresh:"Refresh",langTip:"Language: English (click to switch)",loading:"Loading…",theme:"Theme",themeAuto:"Follow system",themeLight:"Light",themeDark:"Dark",w5:"5h window",wk:"Weekly",reset:"Resets",
+langTip:"Language: English (click to switch)",loading:"Loading…",theme:"Theme",themeAuto:"Follow system",themeLight:"Light",themeDark:"Dark",w5:"5h window",wk:"Weekly",reset:"Resets",
 status:"Usage",limited:"Limited",avail:"✓ Available",unknown:"Unknown",
 eta5:"5h quota ETA",etaw:"Weekly quota ETA",
 credits:"Reset credits",forecast:"Forecast",landed:"Landed",
 news:"News",pauseAll:"⏸ Pause all",resumeAll:"▶ Resume all",
 recent:"Recent conversations",
-noThread:"No recent conversations — open one in Codex, then refresh",
+noThread:"No recent conversations — open one in Codex; the panel refreshes automatically",
 guard:"Auto-resume",weekly:"Weekly",card:"Credits",noneC:"(none)",
 expirePfx:" (expires ",model:"Model",inherit:"Inherit",prompt:"Resume prompt",
 resetD:"Reset",lastUpd:"Last",resumed:"resumed",times:"×",tryPfx:" (",
@@ -300,9 +298,9 @@ g_paused:"paused",g_blocked:"blocked",g_complete:"complete",
 goalOK:"✓ auto-continued",uiaOK:"✓ Continue clicked",writerBusy:"held by the Codex app; guard resumes once released",quotaWait:"waiting for quota",capacityWait:"waiting for model capacity",
 errConn:"Cannot reach guard daemon: ",errTimeout:"request timed out (8s)",
 errFail:"connection failed",
-errHint:". Click Refresh (top-right); if it persists start: ",
+errHint:". The panel retries every 15s; if this persists, start the daemon: ",
 upd:"Saved",restored:"Prompt reset to default",pauseOK:"Paused all",
-resumeOK:"Resumed all",refreshed:"Refreshed",
+resumeOK:"Resumed all",
 footer:"Open: type <code>http://127.0.0.1:8765</code> in the sidebar (recommended, no quota cost) · desktop shortcut · full docs in the plugin README"}};
 function L(k){var d=I18N[LNG]||I18N.zh;var v=d[k];
 return (v===undefined)?(I18N.zh[k]||k):v}
@@ -538,8 +536,6 @@ var els=document.querySelectorAll("[data-i18n]");
 for(var i=0;i<els.length;i++){els[i].textContent=L(els[i].getAttribute("data-i18n"))}
 var lb=document.getElementById("langBtn");
 if(lb){var lt=L("langTip");lb.title=lt;lb.setAttribute("aria-label",lt)}
-var rb=document.getElementById("refreshBtn");
-if(rb){var rt=L("refresh");rb.title=rt;rb.setAttribute("aria-label",rt)}
 var tb=document.getElementById("themeBtn");if(tb){syncThemeUi()}
 var ft=document.getElementById("foot");if(ft){ft.innerHTML=L("footer")}
 var ld=document.getElementById("ld");if(ld){ld.textContent=L("loading")}
