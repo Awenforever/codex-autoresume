@@ -13,22 +13,41 @@ from __future__ import annotations
 import time
 
 
-def add_sample(samples: list[tuple[float, int | None, int | None]],
-               primary: int | None, secondary: int | None,
+def add_sample(samples: list[tuple], primary: int | None,
+               secondary: int | None,
+               primary_reset: int | None = None,
+               secondary_reset: int | None = None,
                keep_sec: float = 6 * 3600) -> list[tuple]:
-    """Append a (timestamp, primary%, secondary%) sample and trim old ones.
+    """Append (timestamp, primary%, secondary%, reset epochs) and trim.
 
-    A large downward jump means a window rolled over: history resets so the
-    rate is not poisoned by the drop.
+    History resets when a window rolls over, so no rate or ratio is ever
+    computed across a refill. Two independent signals trigger this: a large
+    downward jump in either percentage, and a change of either window's
+    ``resets_at`` epoch. The epoch check also catches light blocks whose
+    used-% drop is below the jump threshold — the boundary must not rely on
+    magnitudes. Samples from before a 5h reset are useless for the weekly
+    ratio (part of that block was spent exhausted, so weekly stayed flat).
     """
     now = time.time()
     if samples:
         last = samples[-1]
+        rolled = False
         for prev, cur in ((last[1], primary), (last[2], secondary)):
             if prev is not None and cur is not None and prev - cur > 10:
-                samples = []
+                rolled = True
                 break
-    samples.append((now, primary, secondary))
+        if not rolled:
+            for idx, cur in ((3, primary_reset), (4, secondary_reset)):
+                prev = last[idx] if len(last) > idx else None
+                # 60s tolerance: do not wipe history on a minor epoch jitter
+                if (prev is not None and cur is not None
+                        and abs(prev - cur) >= 60):
+                    rolled = True
+                    break
+        if rolled:
+            samples = []
+    samples.append((now, primary, secondary, primary_reset,
+                    secondary_reset))
     cutoff = now - keep_sec
     return [s for s in samples if s[0] >= cutoff]
 
@@ -135,17 +154,30 @@ def simulate_weekly_eta(now: float, secondary_used, t: float,
     return now + win_h * 3600.0 * i
 
 
-def window_ratio(samples: list[tuple]) -> float | None:
+def window_ratio(samples: list[tuple],
+                 primary_reset: int | None = None) -> float | None:
     """Weekly-% per primary-%, measured within the CURRENT 5h window.
 
     The weekly quota accumulates across 5h blocks, so a ratio computed
     across a block boundary is meaningless (primary drops to 0, weekly
-    does not). Segment the samples at the last primary rollover (a drop
-    of >= 10 points) and require a primary rise of >= 3 points inside the
-    segment. Empirically ~0.18 on a Plus plan (weekly cap ~5x the 5h cap).
+    does not). Two guards apply:
+
+    * every sample must belong to the window identified by
+      *primary_reset* (the snapshot's ``resets_at``) when it is known;
+      otherwise the delta pair spans a refill and pairs one block's
+      weekly growth with another block's primary consumption;
+    * the segment is cut at the newest rollover of either column, and a
+      primary rise of >= 3 points inside it is required.
+
+    Empirically ~0.18 on a Plus plan (weekly cap ~5x the 5h cap).
     """
     if len(samples) < 2:
         return None
+    if primary_reset is not None:
+        samples = [s for s in samples
+                   if len(s) > 3 and s[3] == primary_reset]
+        if len(samples) < 2:
+            return None
     # segment at the last rollover of EITHER column: the 5h block refill
     # drops primary, the weekly reset drops secondary — both poison the
     # delta pair, so the measurement window starts after the newest one

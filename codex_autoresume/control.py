@@ -758,7 +758,7 @@ class ControlApi:
             #   t:      weekly-% per primary-%, measured inside the current
             #           block (cross-block deltas are meaningless)
             win_sec = (snap.primary.window_duration_mins or 300) * 60
-            t = window_ratio(samples)
+            t = window_ratio(samples, snap.primary.resets_at)
             P = snap.primary.used_percent
             S = snap.secondary.used_percent
             eta_p = simulate_primary_eta(_time.time(), P, rate_p)

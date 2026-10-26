@@ -539,7 +539,9 @@ class Daemon:
             self._usage_samples = add_sample(
                 self._usage_samples,
                 self._snapshot.primary.used_percent,
-                self._snapshot.secondary.used_percent)
+                self._snapshot.secondary.used_percent,
+                self._snapshot.primary.resets_at,
+                self._snapshot.secondary.resets_at)
             self._watch_reset_credits()
             self._record_reset_events()
             p, s = self._snapshot.primary, self._snapshot.secondary

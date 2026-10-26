@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime, timedelta
 
 from codex_autoresume.usage import (add_sample, estimate_ratio, eta_epoch,
-                                    window_rate)
+                                    window_rate, window_ratio)
 
 
 class TestUsageRate(unittest.TestCase):
@@ -84,6 +84,72 @@ class TestUsageRate(unittest.TestCase):
         samples = [(now - 7 * 3600, 10, 1)]
         samples = add_sample(samples, 12, 1)
         self.assertEqual(len(samples), 1)
+
+
+class WindowScopingTest(unittest.TestCase):
+    """Weekly ratio samples must belong to the CURRENT 5h window."""
+
+    def test_add_sample_clears_on_5h_window_change_without_big_drop(self):
+        # light block: 8% -> 0% is below the >10 jump guard, yet it is a
+        # window boundary and must not leak into the next block's ratio
+        samples = add_sample([], 8, 12, 1_000, 9_000)
+        samples = add_sample(samples, 0, 12, 2_000, 9_000)
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(samples[0][1], 0)
+
+    def test_add_sample_clears_after_an_exhausted_block(self):
+        samples = add_sample([], 100, 29, 1_000, 9_000)
+        samples = add_sample(samples, 0, 29, 2_000, 9_000)
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(samples[0][2], 29)
+
+    def test_add_sample_keeps_history_inside_one_window(self):
+        samples = add_sample([], 10, 5, 1_000, 9_000)
+        samples = add_sample(samples, 20, 6, 1_030, 9_000)  # 30s jitter
+        self.assertEqual(len(samples), 2)
+
+    def test_add_sample_clears_on_weekly_window_change(self):
+        samples = add_sample([], 40, 5, 1_000, 9_000)
+        samples = add_sample(samples, 42, 0, 1_000, 9_500)
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(samples[0][2], 0)
+
+    def test_add_sample_without_reset_epochs_keeps_legacy_behavior(self):
+        samples = add_sample([], 10, 5)
+        samples = add_sample(samples, 20, 6)
+        self.assertEqual(len(samples), 2)
+
+    def test_ratio_ignores_previous_block(self):
+        # The reported 00:22 scenario: the previous block ends exhausted
+        # (weekly flat), the new block spends 13 primary points for +2
+        # weekly. Pairing old data with the new block would report 4/13.
+        now = 1_800_000_000.0
+        samples = [
+            (now - 4 * 3600, 0, 10, 1_000, 9_000),
+            (now - 2 * 3600, 8, 12, 1_000, 9_000),
+            (now - 3600, 0, 12, 2_000, 9_000),   # reset at "00:22"
+            (now, 13, 14, 2_000, 9_000),
+        ]
+        self.assertAlmostEqual(window_ratio(samples, 2_000), 2 / 13, places=4)
+        # without the epoch filter a light rollover (<10 points) is missed
+        self.assertAlmostEqual(window_ratio(samples), 4 / 13, places=4)
+
+    def test_exhausted_tail_does_not_dilute_the_ratio(self):
+        now = 1_800_000_000.0
+        samples = [
+            (now - 5 * 3600, 0, 10, 1_000, 9_000),
+            (now - 3 * 3600, 100, 29, 1_000, 9_000),
+            (now - 2 * 3600, 100, 29, 1_000, 9_000),  # flat exhausted tail
+            (now - 3600, 0, 29, 2_000, 9_000),
+            (now, 13, 31, 2_000, 9_000),
+        ]
+        self.assertAlmostEqual(window_ratio(samples, 2_000), 2 / 13, places=4)
+
+    def test_ratio_none_without_enough_current_window_samples(self):
+        now = 1_800_000_000.0
+        samples = [(now - 3600, 0, 29, 1_000, 9_000),
+                   (now, 13, 31, 2_000, 9_000)]
+        self.assertIsNone(window_ratio(samples, 2_000))
 
 
 if __name__ == "__main__":
