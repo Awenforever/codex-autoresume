@@ -32,13 +32,15 @@ PANEL_HTML = r"""<!doctype html>
 --warnbg:#3a3320;--link:#7ec8ff;--tickmaj:#39424a;--tickmin:#242b30;
 --hovbd:#31403a;--tipbg:#20272c;--tipfg:#dfe6ea;--swbg:#2c343a;--swknob:#aab4bb;
 --ph:#5c666d;--accent-rgb:16,163,127;--warn-rgb:224,163,65;--shadow:rgba(0,0,0,.45);
+--reset:#c9a6ff;--resetbg:rgba(170,135,255,.15);--resetglow:rgba(170,135,255,.55);
 color-scheme:dark}
 body.light{--bg:#f5f7f7;--card:#ffffff;--card2:#eef2f2;--line:#dfe6e8;--fg:#1b272c;
 --dim:#64737a;--accent:#0d8a6a;--accent-soft:#e0f2ec;--warn:#a9741f;--danger:#cf443c;
 --track:#e4ebeb;--hand:#202b31;--hand2:#5d6b72;--chipbg:#e9f3f0;--chipbd:#cfe4dc;
 --warnbg:#f6ecd4;--link:#17749f;--tickmaj:#9fadb2;--tickmin:#d3dcde;
---hovbd:#c9d8d2;--tipbg:#243139;--tipfg:#e8eef0;--swbg:#c6d2d6;--swknob:#ffffff;
+--hovbd:#c9d8d2;--tipbg:#ffffff;--tipfg:#26343b;--swbg:#c6d2d6;--swknob:#ffffff;
 --ph:#9aa7ad;--accent-rgb:13,138,106;--warn-rgb:169,116,31;--shadow:rgba(23,42,50,.16);
+--reset:#6a3fd1;--resetbg:rgba(106,63,209,.10);--resetglow:rgba(106,63,209,0);
 color-scheme:light}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--fg);font:14px/1.55 -apple-system,"Segoe UI",
@@ -105,6 +107,9 @@ padding:0 6px;margin-right:10px}
 .hl-ok{color:var(--accent);font-weight:600}
 .hl-warn{color:var(--warn);font-weight:600}
 .hl-t{color:var(--link)}
+.hl-reset{color:var(--reset);font-weight:700;background:var(--resetbg);
+border-radius:5px;padding:0 4px;-webkit-box-decoration-break:clone;
+box-decoration-break:clone;text-shadow:0 0 9px var(--resetglow)}
 .chip{white-space:nowrap}
 .kv .ok{color:var(--accent)} .kv .bad{color:var(--danger)} .kv .eta{color:var(--warn)}
 button{background:var(--card2);border:1px solid var(--line);color:var(--fg);
@@ -354,7 +359,8 @@ function esc(s){return String(s===null||s===undefined?"":s).replace(/&/g,"&amp;"
 function hlNews(t){
  // single pass over the escaped text: no nested spans, broad lexicon
  var RE=new RegExp(
- "(Landed as announced[^,.]{0,60})"+
+ "(Landed as announced(?:(?!\\bresets?\\b)[^,.]){0,60})"+
+ "|\\b(resets?|resetting)\\b"+
  "|\\b(Landing|upcoming|tomorrow|tonight|today|yesterday|midnight|noon|"+
  "dawn|dusk|morning|afternoon|evening|night)\\b"+
  "|(\\b\\d{1,2}:\\d{2}\\s*(?:am|pm)?\\b(?:\\s*(?:UTC|GMT|PST|PDT|PT|EST|EDT|CST|CDT|MST|MDT|Pacific\\s+Time))?"+
@@ -364,8 +370,8 @@ function hlNews(t){
  "|\\b(?:UTC|GMT|PST|PDT|PT|EST|EDT|CST|CDT|MST|MDT)\\b"+
  "|\\b\\d+\\s*(?:hours?|hrs?|minutes?|mins?|seconds?|secs?|days?|weeks?|months?)\\b)"+
  "|\\b(before|after|around|about|by|until|till|next|soon|early|late)\\b","gi");
- return String(t).replace(RE,function(m,ok,warn,tm){
- var cls=ok?"hl-ok":(tm?"hl-t":"hl-warn");
+ return String(t).replace(RE,function(m,ok,rs,warn,tm){
+ var cls=ok?"hl-ok":(rs?"hl-reset":(tm?"hl-t":"hl-warn"));
  return '<span class="'+cls+'">'+m+"</span>"})}
 function newsBox(s){
  var ann=s.announcement||null;

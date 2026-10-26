@@ -4,6 +4,7 @@ A Python-side syntax check passes even when the JS inside PANEL_HTML is
 broken (the page then sits at "加载中" forever with no visible error), so
 parse the script with node whenever it is installed.
 """
+import json
 import os
 import re
 import shutil
@@ -31,6 +32,41 @@ class PanelJsSyntaxTest(unittest.TestCase):
                 "panel JS syntax error:\n%s" % (r.stderr or "")[:2000])
         finally:
             os.unlink(path)
+
+
+class PanelNewsHighlightTest(unittest.TestCase):
+    """The news lexicon must give the word "reset" its own accent class."""
+
+    def test_reset_keyword_gets_its_own_class(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not installed")
+        from codex_autoresume.control import PANEL_HTML
+        js = re.search(r"<script>(.*)</script>", PANEL_HTML, re.S).group(1)
+        m = re.search(r"function hlNews\(t\)\{.*?\}\)\}", js, re.S)
+        self.assertTrue(m, "hlNews not found in panel script")
+        harness = m.group(0) + r"""
+const out = [
+  hlNews("Day 20/ Rest and reset"),
+  hlNews("Landed as announced reset at 15:00"),
+  hlNews("Preset values keep their tone")
+];
+console.log(JSON.stringify(out));
+"""
+        fd, path = tempfile.mkstemp(suffix=".js")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(harness)
+            r = subprocess.run([node, path], capture_output=True, text=True,
+                               timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr[:2000])
+            plain, landed, preset = json.loads(r.stdout.strip().splitlines()[-1])
+        finally:
+            os.unlink(path)
+        self.assertIn('<span class="hl-reset">reset</span>', plain)
+        self.assertIn('class="hl-ok"', landed)
+        self.assertIn('<span class="hl-reset">reset</span>', landed)
+        self.assertNotIn("hl-reset", preset)
 
 
 if __name__ == "__main__":
