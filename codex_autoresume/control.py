@@ -253,7 +253,7 @@ var LNG="en";try{LNG=localStorage.getItem("cglang")||"en"}catch(e){}if(LNG!=="zh
 var I18N={
 zh:{title:"Codex 守护",sub:"额度重置后自动继续任务 · 仅本机",langTip:"语言：中文（点击切换）",loading:"加载中…",theme:"主题",themeAuto:"自动跟随系统",themeLight:"浅色",themeDark:"深色",
 w5:"5 小时窗口",wk:"周窗口",reset:"重置",status:"使用状态",limited:"额度受限",
-avail:"✓ 可正常使用",unknown:"状态未知",eta5:"5h 额度预估耗尽",etaw:"周额度预估耗尽",
+avail:"✓ 可正常使用",unknown:"状态未知",eta5:"5h 额度预估耗尽",etaw:"周额度预估耗尽",weeklyfirst:"周额度先重置",
 credits:"重置赠送",forecast:"预告",landed:"到账",
 news:"动态",pauseAll:"⏸ 全部暂停",resumeAll:"▶ 全部继续",
 recent:"近期会话",
@@ -278,7 +278,7 @@ footer:"打开方式：侧栏输入 <code>http://127.0.0.1:8765</code>（推荐�
 en:{title:"Codex Guard",sub:"Auto-continue conversations after quota resets",
 langTip:"Language: English (click to switch)",loading:"Loading…",theme:"Theme",themeAuto:"Follow system",themeLight:"Light",themeDark:"Dark",w5:"5h window",wk:"Weekly",reset:"Resets",
 status:"Usage",limited:"Limited",avail:"✓ Available",unknown:"Unknown",
-eta5:"5h quota ETA",etaw:"Weekly quota ETA",
+eta5:"5h quota ETA",etaw:"Weekly quota ETA",weeklyfirst:"Weekly resets first",
 credits:"Reset credits",forecast:"Forecast",landed:"Landed",
 news:"News",pauseAll:"⏸ Pause all",resumeAll:"▶ Resume all",
 recent:"Recent conversations",
@@ -336,13 +336,14 @@ function ring(pct,label,reset){
  '<div class="pct" style="color:'+col+'">'+fmt(pct)+"%</div></div>"+
  '<div class="ringlbl">'+label+"</div>"+
  (reset?'<div class="ringreset">'+L("reset")+" "+reset+"</div>":"")+"</div>"}
-function etaRow(label,q,etaK,rateK,exhK){
- var eta=q[etaK],rate=q[rateK];
- var b=(eta?('<b class="eta">'+fmtMDHM(eta)+"</b>")
+function etaRow(label,q,etaK,rateK,exhK,capK){
+ var eta=q[etaK],rate=q[rateK],cap=capK&&q[capK];
+ var b=(cap?('<b class="eta">'+L("weeklyfirst")+"</b>")
+ :(eta?('<b class="eta">'+fmtMDHM(eta)+"</b>")
  :(exhK&&q[exhK]&&q.secondary_used>=100?
    ('<b class="eta">'+L("exhausted")+" · "+fmtMDHM(q[exhK])+"</b>")
- :"<b>--</b>"));
- var tail=(rate?(' <span style="font-size:11px">('+rate+"%/h)</span>"):"");
+ :"<b>--</b>")));
+ var tail=(!cap&&rate?(' <span style="font-size:11px">('+rate+"%/h)</span>"):"");
 
  return '<div class="kv"><span>'+label+"</span><span>"+b+tail+"</span></div>"}
 function kvRow(k,v){return '<div class="kv"><span>'+k+"</span><span>"+v+"</span></div>"}
@@ -446,7 +447,7 @@ hinfo.innerHTML=
 kvRow(L("status"),'<b class="'+(q.allowed===false?"bad":"ok")+'">'+
 (q.allowed===false?L("limited"):q.allowed===true?L("avail"):L("unknown"))+"</b>")+
 etaRow(L("eta5"),q,"eta_primary","rate_primary")+
-etaRow(L("etaw"),q,"eta_secondary","rate_secondary","secondary_reset")+
+etaRow(L("etaw"),q,"eta_secondary","rate_secondary","secondary_reset","eta_secondary_capped")+
 kvRow(L("credits"),'<b>'+fmt((q.credits_count!==undefined)?q.credits_count:q.credits)+"</b>")+
 annRows;
 }
@@ -747,22 +748,38 @@ class ControlApi:
         quota = None
         if snap:
             import time as _time
-            from .usage import (eta_epoch, simulate_weekly_eta,
-                                simulate_primary_eta, window_ratio)
+            from .usage import (WINDOW_EPOCH_TOLERANCE, eta_epoch,
+                                pooled_ratio, simulate_primary_eta,
+                                simulate_weekly_eta)
             samples = getattr(d, "_usage_samples", [])
             eta_p, rate_p, _ = eta_epoch(samples, 1, 3600)
-            # Codex quota model: 5h blocks refill fully at their end; the
-            # weekly quota accumulates across blocks. NO fallbacks: every
-            # rate/ratio is measured, or the row shows "--".
+            # Codex quota model: 5h blocks refill fully at their end and
+            # gate the weekly drain; the weekly quota accumulates across
+            # blocks. NO fallbacks: every rate/ratio is measured, or the
+            # row shows "--".   t is pooled over completed 5h windows
+            # because one block's integer-rounded ds swings it too much.
             #   rate_p: primary %/h over the trailing hour (min 10min span)
-            #   t:      weekly-% per primary-%, measured inside the current
-            #           block (cross-block deltas are meaningless)
+            #   t:      weekly-% per primary-%, pooled within-block
             win_sec = (snap.primary.window_duration_mins or 300) * 60
-            t = window_ratio(samples, snap.primary.resets_at)
             P = snap.primary.used_percent
             S = snap.secondary.used_percent
-            eta_p = simulate_primary_eta(_time.time(), P, rate_p)
-            eta_s = simulate_weekly_eta(_time.time(), S, t, win_sec)
+            b = snap.primary.resets_at
+            cur = None
+            if (st and b is not None and st.weekly_ratio_b is not None
+                    and abs(st.weekly_ratio_b - b)
+                    <= WINDOW_EPOCH_TOLERANCE
+                    and None not in (st.weekly_ratio_p0, st.weekly_ratio_p1,
+                                     st.weekly_ratio_s0,
+                                     st.weekly_ratio_s1)):
+                dp = st.weekly_ratio_p1 - st.weekly_ratio_p0
+                ds = st.weekly_ratio_s1 - st.weekly_ratio_s0
+                if dp > 0 and ds > 0:
+                    cur = {"b": st.weekly_ratio_b, "dp": dp, "ds": ds}
+            t = pooled_ratio(st.weekly_ratio_windows if st else [], cur)
+            now = _time.time()
+            eta_p = simulate_primary_eta(now, P, rate_p)
+            eta_s, capped, _reason = simulate_weekly_eta(
+                now, P, S, rate_p, t, b, snap.secondary.resets_at, win_sec)
             rate_s = (rate_p * t) if (rate_p and t) else None
             # weekly ETA retention: while the 5h block is exhausted nothing
             # burns, so t is unmeasurable — freeze the last valid value
@@ -771,10 +788,18 @@ class ControlApi:
             if S is not None and S >= 100:
                 eta_p = None
                 eta_s = None
+                capped = False
+                rate_s = None
+            elif P is not None and P >= 100:
+                eta_s = st.last_weekly_eta
+                capped = False
+                rate_s = None
             elif eta_s is not None:
                 st.last_weekly_eta = eta_s
-            elif P is not None and P >= 100 and S is not None and S < 100:
-                eta_s = st.last_weekly_eta
+            elif capped:
+                # the weekly resets before exhaustion: there is no ETA to
+                # freeze, and an older generation's value must not resurface
+                st.last_weekly_eta = None
             quota = {
                 "primary_used": snap.primary.used_percent,
                 "primary_reset": snap.primary.resets_at,
@@ -787,7 +812,10 @@ class ControlApi:
                 "rate_primary": round(rate_p, 2) if rate_p else None,
                 "eta_secondary": eta_s,
                 "rate_secondary": round(rate_s, 2) if rate_s else None,
-                "eta_secondary_capped": False,
+                "eta_secondary_capped": bool(capped),
+                "weekly_ratio": round(t, 4) if t else None,
+                "weekly_ratio_windows": (len(st.weekly_ratio_windows)
+                                         if st else 0),
                 "credits_count": len(snap.reset_credits),
                 "credits_nearest_expiry": (
                     min((c.expires_at for c in snap.reset_credits

@@ -542,6 +542,7 @@ class Daemon:
                 self._snapshot.secondary.used_percent,
                 self._snapshot.primary.resets_at,
                 self._snapshot.secondary.resets_at)
+            self._track_weekly_ratio()
             self._watch_reset_credits()
             self._record_reset_events()
             p, s = self._snapshot.primary, self._snapshot.secondary
@@ -775,6 +776,85 @@ class Daemon:
                 self._state_mtime = os.path.getmtime(st.state_path)
         except Exception:
             pass
+
+    def _track_weekly_ratio(self) -> None:
+        """Maintain the within-block primary/weekly pair behind ``t``.
+
+        The weekly quota accumulates across 5h blocks, so the burn ratio is
+        measurable only inside one block: a block's weekly growth is
+        compared with the primary burned in that same block, never across a
+        refill or a weekly reset. Completed pairs are pooled; the open
+        window's baseline travels in the persisted state so a restart
+        neither loses it nor fabricates a window from a cross-block delta.
+        """
+        from .usage import WINDOW_EPOCH_TOLERANCE
+        snap = self._snapshot
+        st = self.state
+        if snap is None or st is None:
+            return
+        p = snap.primary.used_percent
+        s = snap.secondary.used_percent
+        b = snap.primary.resets_at
+        if p is None or s is None or b is None:
+            return
+        plan = snap.plan_type
+        if plan is not None and st.weekly_ratio_plan not in (None, plan):
+            log.info("plan changed %s -> %s: weekly ratio pool cleared",
+                     st.weekly_ratio_plan, plan)
+            st.weekly_ratio_windows = []
+            st.weekly_ratio_b = None
+            st.weekly_ratio_p0 = st.weekly_ratio_s0 = None
+            st.weekly_ratio_p1 = st.weekly_ratio_s1 = None
+            st.last_weekly_eta = None
+        if plan is not None:
+            st.weekly_ratio_plan = plan
+        b0 = st.weekly_ratio_b
+        if b0 is None:
+            self._start_ratio_window(b, p, s)
+            return
+        new_window = abs(b - b0) > WINDOW_EPOCH_TOLERANCE
+        primary_drop = (st.weekly_ratio_p1 is not None
+                        and st.weekly_ratio_p1 - p >= 10)
+        weekly_drop = (st.weekly_ratio_s1 is not None
+                       and st.weekly_ratio_s1 - s >= 10)
+        if not (new_window or primary_drop or weekly_drop):
+            st.weekly_ratio_p1 = p
+            st.weekly_ratio_s1 = s
+            return
+        # a mid-block weekly reset poisons the pair (the weekly delta goes
+        # negative); anything with a primary refill is a completed block
+        if not weekly_drop or new_window or primary_drop:
+            self._close_ratio_window()
+        if weekly_drop:
+            st.last_weekly_eta = None
+        self._start_ratio_window(b, p, s)
+        save_state(st)
+        self._state_mtime = os.path.getmtime(st.state_path)
+
+    def _start_ratio_window(self, b: int, p: int, s: int) -> None:
+        st = self.state
+        st.weekly_ratio_b = int(b)
+        st.weekly_ratio_p0 = st.weekly_ratio_p1 = int(p)
+        st.weekly_ratio_s0 = st.weekly_ratio_s1 = int(s)
+
+    def _close_ratio_window(self) -> None:
+        st = self.state
+        if None in (st.weekly_ratio_b, st.weekly_ratio_p0,
+                    st.weekly_ratio_s0, st.weekly_ratio_p1,
+                    st.weekly_ratio_s1):
+            return
+        dp = st.weekly_ratio_p1 - st.weekly_ratio_p0
+        ds = st.weekly_ratio_s1 - st.weekly_ratio_s0
+        if dp < 10 or ds <= 0:
+            return
+        st.weekly_ratio_windows.append({"b": int(st.weekly_ratio_b),
+                                        "dp": int(dp), "ds": int(ds)})
+        cutoff = int(time.time() - 30 * 86400)
+        st.weekly_ratio_windows = [
+            w for w in st.weekly_ratio_windows
+            if w.get("b", 0) >= cutoff][-40:]
+        log.info("weekly ratio window closed: dP=%d dS=%d (t=%.4f)",
+                 dp, ds, ds / dp)
 
     def _record_reset_events(self) -> None:
         """Record quota windows ACTUALLY resetting (used% big drop).

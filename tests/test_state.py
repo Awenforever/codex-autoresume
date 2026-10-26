@@ -18,6 +18,13 @@ class TestState(unittest.TestCase):
         t.append_history({"at": "now", "kind": "success"})
         st.seen_sources.add("turn:x")
         st.turns_watermark = 42
+        st.weekly_ratio_plan = "plus"
+        st.weekly_ratio_windows = [{"b": 1000, "dp": 100, "ds": 16}]
+        st.weekly_ratio_b = 4600
+        st.weekly_ratio_p0 = 0
+        st.weekly_ratio_s0 = 16
+        st.weekly_ratio_p1 = 41
+        st.weekly_ratio_s1 = 22
         save_state(st)
         st2 = load_state(path)
         self.assertTrue(st2.threads["t1"].tracked)
@@ -25,6 +32,12 @@ class TestState(unittest.TestCase):
         self.assertEqual(st2.threads["t1"].history[0]["kind"], "success")
         self.assertIn("turn:x", st2.seen_sources)
         self.assertEqual(st2.turns_watermark, 42)
+        self.assertEqual(st2.weekly_ratio_plan, "plus")
+        self.assertEqual(st2.weekly_ratio_windows,
+                         [{"b": 1000, "dp": 100, "ds": 16}])
+        self.assertEqual((st2.weekly_ratio_b, st2.weekly_ratio_p0,
+                          st2.weekly_ratio_s0, st2.weekly_ratio_p1,
+                          st2.weekly_ratio_s1), (4600, 0, 16, 41, 22))
 
     def test_counters(self):
         t = ThreadState(resume_count_day="2026-10-24", resume_count_today=2)

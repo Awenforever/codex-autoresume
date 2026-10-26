@@ -1,6 +1,6 @@
 {
   "name": "codex-autoresume-guard",
-  "version": "0.3.47",
+  "version": "0.3.48",
   "description": "Control panel: http://127.0.0.1:8765 — auto-continue Codex conversations and goals after quota resets. / 控制面板：http://127.0.0.1:8765 —— 额度重置后自动继续 Codex 对话与 goal。",
   "author": {
     "name": "codex-autoresume contributors",

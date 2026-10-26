@@ -155,6 +155,49 @@ console.log(JSON.stringify(out));
         self.assertEqual(got, [True, False, False, False, True, True])
 
 
+class PanelWeeklyCapTest(unittest.TestCase):
+    """A capped weekly ETA says "resets first" and drops the %/h tail."""
+
+    def test_capped_row(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not installed")
+        from codex_autoresume.control import PANEL_HTML
+        js = re.search(r"<script>(.*)</script>", PANEL_HTML, re.S).group(1)
+        m = re.search(r"function etaRow\(.*?\}", js, re.S)
+        self.assertTrue(m, "etaRow not found in panel script")
+        harness = m.group(0) + r"""
+var I18N = {en: {weeklyfirst: "Weekly resets first",
+                 exhausted: "Exhausted"}};
+function L(k){ return I18N.en[k] || k }
+function fmtMDHM(e){ return "T" + Math.round(e) }
+const q = {eta_secondary: 1234, rate_secondary: 6.2,
+           eta_secondary_capped: true, secondary_used: 34,
+           secondary_reset: 9999};
+const capped = etaRow("w", q, "eta_secondary", "rate_secondary",
+                      "secondary_reset", "eta_secondary_capped");
+const plain = etaRow("w", {eta_secondary: 1234, rate_secondary: 6.2,
+                           secondary_used: 34, eta_secondary_capped: false},
+                     "eta_secondary", "rate_secondary",
+                     "secondary_reset", "eta_secondary_capped");
+console.log(JSON.stringify([capped, plain]));
+"""
+        fd, path = tempfile.mkstemp(suffix=".js")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(harness)
+            r = subprocess.run([node, path], capture_output=True, text=True,
+                               timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr[:2000])
+            capped, plain = json.loads(r.stdout.strip().splitlines()[-1])
+        finally:
+            os.unlink(path)
+        self.assertIn("Weekly resets first", capped)
+        self.assertNotIn("%/h", capped)
+        self.assertIn("T1234", plain)
+        self.assertIn("6.2%/h", plain)
+
+
 if __name__ == "__main__":
     unittest.main()
 

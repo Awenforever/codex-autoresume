@@ -6,11 +6,22 @@ after a minimum sample span, and the weekly-window estimate is capped by
 the structural maximum: weekly percentage can never rise faster than
 ``(100% / 5h) * ratio`` where ``ratio = weekly% rise per primary% rise`` —
 the 5-hour window is a hard gate on how fast the weekly budget drains.
+
+The ratio is measured only inside one 5h block (``delta weekly`` tracks
+``delta primary`` there) and pooled over completed blocks. A block that
+ended exhausted still contributes a valid pair; a block's flat exhausted
+tail does not dilute it because the pair is baseline-to-last, not a rate.
 """
 
 from __future__ import annotations
 
+import math
 import time
+
+# resets_at is not stable to the second: the backend may correct it by a
+# couple of minutes within the same block. Window identity therefore uses
+# a tolerance instead of exact epoch equality.
+WINDOW_EPOCH_TOLERANCE = 300
 
 
 def add_sample(samples: list[tuple], primary: int | None,
@@ -39,9 +50,10 @@ def add_sample(samples: list[tuple], primary: int | None,
         if not rolled:
             for idx, cur in ((3, primary_reset), (4, secondary_reset)):
                 prev = last[idx] if len(last) > idx else None
-                # 60s tolerance: do not wipe history on a minor epoch jitter
+                # tolerance: do not wipe history on an epoch correction that
+                # still identifies the same window
                 if (prev is not None and cur is not None
-                        and abs(prev - cur) >= 60):
+                        and abs(prev - cur) > WINDOW_EPOCH_TOLERANCE):
                     rolled = True
                     break
         if rolled:
@@ -135,47 +147,105 @@ def eta_epoch(samples: list[tuple], idx: int, window_sec: float,
     return int(now + hours * 3600), rate, capped
 
 
-def simulate_weekly_eta(now: float, secondary_used, t: float,
-                        win_sec: float = None):
-    """Weekly-exhaustion epoch: i = remaining / (100t) block-equivalents.
+def simulate_weekly_eta(now: float, primary_used, secondary_used, rate_pct_h,
+                        ratio, block_end, weekly_end=None,
+                        win_sec: float = None
+                        ) -> tuple[float | None, bool, str]:
+    """Rate-aware weekly-exhaustion epoch: (eta, capped, reason).
 
-    t = weekly-% consumed per 1% of 5h consumed (measured in-block); each
-    5h block consumes at most 100t weekly. The remaining weekly quota
-    covers i = (100 - S) / (100t) blocks (i may be fractional), each
-    costing its 5h. No rate, no reset handling — the current block's
-    unused capacity is just part of those i block-equivalents.
+    The 5h window gates the weekly drain: within the current block only
+    ``x0 = min(100-P, r*(block_end-now))`` primary points can still burn,
+    costing ``ratio*x0`` weekly. If that covers the remainder, the weekly
+    quota runs out at ``now + W/(ratio*r)``. Otherwise the remainder is
+    covered by whole blocks, each refilling 100 primary and burning at most
+    ``Cb = min(100, r*L)`` of it (a low rate leaves a block unused), until
+    a fractional last block.
+
+    ``capped`` means the weekly window resets before the projected
+    exhaustion; there is no exhaustion ETA to show. No rate or ratio means
+    no ETA — nothing is fabricated from the structural maximum alone.
     """
-    if secondary_used is None or not t or t <= 0:
-        return None
+    if (primary_used is None or secondary_used is None or ratio is None
+            or not ratio or ratio <= 0 or rate_pct_h is None
+            or rate_pct_h <= 0 or block_end is None):
+        return None, False, "insufficient"
     if secondary_used >= 100:
-        return None
-    i = (100.0 - secondary_used) / (100.0 * t)
-    win_h = (win_sec or 5 * 3600) / 3600.0
-    return now + win_h * 3600.0 * i
+        return None, False, "exhausted"
+    L_h = (win_sec or 5 * 3600) / 3600.0
+    W = 100.0 - secondary_used
+    x0 = min(max(100.0 - primary_used, 0.0),
+             max(rate_pct_h * (block_end - now) / 3600.0, 0.0))
+    if W <= ratio * x0:
+        eta = now + W / (ratio * rate_pct_h) * 3600.0
+    else:
+        w1 = W - ratio * x0
+        cb = min(100.0, rate_pct_h * L_h)
+        q = w1 / (ratio * cb)
+        j = max(1, math.ceil(q - 1e-9))
+        f = q - (j - 1)
+        eta = (block_end + (j - 1) * L_h * 3600.0
+               + f * (cb / rate_pct_h) * 3600.0)
+    if weekly_end is not None and weekly_end > now and eta >= weekly_end:
+        return None, True, "capped"
+    return eta, False, "ok"
+
+
+def pooled_ratio(windows: list[dict], current: dict | None = None,
+                 min_completed_dp: int = 20, min_current_dp: int = 5,
+                 current_weight_dp: int = 10) -> float | None:
+    """Weekly-% per primary-% pooled over completed 5h windows.
+
+    Each completed window contributes its ``dp`` as the weight, so long
+    blocks dominate short ones and integer rounding of ``ds`` averages out
+    across blocks. The open window is quantized and may be truncated
+    mid-block, so it only nudges the pool with at most *current_weight_dp*
+    of weight, and only once a completed window exists. With no completed
+    window yet (fresh install), the open window stands alone once it has
+    the same minimum span a completed window needs — below that, one
+    integer step in ``ds`` would swing ``t`` by tens of percent.
+    """
+    completed = [w for w in windows
+                 if w.get("dp", 0) >= min_completed_dp and w.get("ds", 0) > 0]
+    dp = sum(w["dp"] for w in completed)
+    ds = sum(w["ds"] for w in completed)
+    cur = current or {}
+    cdp, cds = cur.get("dp", 0), cur.get("ds", 0)
+    if completed:
+        if cdp >= min_current_dp and cds > 0:
+            w = min(cdp, current_weight_dp)
+            dp += w
+            ds += w * cds / cdp
+        return ds / dp if dp > 0 else None
+    if cdp >= min_completed_dp and cds > 0:
+        return cds / cdp
+    return None
 
 
 def window_ratio(samples: list[tuple],
                  primary_reset: int | None = None) -> float | None:
-    """Weekly-% per primary-%, measured within the CURRENT 5h window.
+    """Weekly-% per primary-%, measured within one 5h window.
 
     The weekly quota accumulates across 5h blocks, so a ratio computed
     across a block boundary is meaningless (primary drops to 0, weekly
     does not). Two guards apply:
 
     * every sample must belong to the window identified by
-      *primary_reset* (the snapshot's ``resets_at``) when it is known;
-      otherwise the delta pair spans a refill and pairs one block's
-      weekly growth with another block's primary consumption;
+      *primary_reset* (the snapshot's ``resets_at``, matched within
+      ``WINDOW_EPOCH_TOLERANCE``) when it is known; otherwise the delta
+      pair spans a refill and pairs one block's weekly growth with another
+      block's primary consumption;
     * the segment is cut at the newest rollover of either column, and a
       primary rise of >= 3 points inside it is required.
 
-    Empirically ~0.18 on a Plus plan (weekly cap ~5x the 5h cap).
+    Used for per-window inspection; the panel pools several windows via
+    :func:`pooled_ratio` so one integer-rounded block cannot swing ``t``.
     """
     if len(samples) < 2:
         return None
     if primary_reset is not None:
         samples = [s for s in samples
-                   if len(s) > 3 and s[3] == primary_reset]
+                   if len(s) > 3 and s[3] is not None
+                   and abs(s[3] - primary_reset) <= WINDOW_EPOCH_TOLERANCE]
         if len(samples) < 2:
             return None
     # segment at the last rollover of EITHER column: the 5h block refill

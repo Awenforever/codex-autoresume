@@ -91,6 +91,16 @@ class WatcherState:
     # block is exhausted (nothing burns, so t is unmeasurable) and the
     # weekly quota is not itself exhausted
     last_weekly_eta: float | None = None
+    # weekly%/primary% burn ratio: completed 5h windows and the open
+    # window's baseline/last sample. Persisted so a restart neither loses
+    # the pooled estimate nor records a phantom window.
+    weekly_ratio_plan: str | None = None
+    weekly_ratio_windows: list[dict[str, Any]] = field(default_factory=list)
+    weekly_ratio_b: int | None = None
+    weekly_ratio_p0: int | None = None
+    weekly_ratio_s0: int | None = None
+    weekly_ratio_p1: int | None = None
+    weekly_ratio_s1: int | None = None
     # first-hand quota-limit evidence: while an interruption says the 5h
     # (or weekly) window is empty until <time>, a snapshot that still reads
     # 99% is trailing and must not trigger resumes or the ring
@@ -146,6 +156,14 @@ def load_state(state_path: str) -> WatcherState:
             st.prev_primary_pct = raw.get("prev_primary_pct")
             st.prev_secondary_pct = raw.get("prev_secondary_pct")
             st.last_weekly_eta = raw.get("last_weekly_eta")
+            st.weekly_ratio_plan = raw.get("weekly_ratio_plan")
+            st.weekly_ratio_windows = list(
+                raw.get("weekly_ratio_windows", []))[-40:]
+            st.weekly_ratio_b = raw.get("weekly_ratio_b")
+            st.weekly_ratio_p0 = raw.get("weekly_ratio_p0")
+            st.weekly_ratio_s0 = raw.get("weekly_ratio_s0")
+            st.weekly_ratio_p1 = raw.get("weekly_ratio_p1")
+            st.weekly_ratio_s1 = raw.get("weekly_ratio_s1")
             st.limit_until_iso = raw.get("limit_until_iso")
             st.limit_window = raw.get("limit_window")
         except (ValueError, TypeError) as e:
@@ -181,6 +199,13 @@ def _save_state_locked(st: WatcherState) -> None:
         "prev_primary_pct": st.prev_primary_pct,
         "prev_secondary_pct": st.prev_secondary_pct,
         "last_weekly_eta": st.last_weekly_eta,
+        "weekly_ratio_plan": st.weekly_ratio_plan,
+        "weekly_ratio_windows": st.weekly_ratio_windows,
+        "weekly_ratio_b": st.weekly_ratio_b,
+        "weekly_ratio_p0": st.weekly_ratio_p0,
+        "weekly_ratio_s0": st.weekly_ratio_s0,
+        "weekly_ratio_p1": st.weekly_ratio_p1,
+        "weekly_ratio_s1": st.weekly_ratio_s1,
         "limit_until_iso": st.limit_until_iso,
         "limit_window": st.limit_window,
     }

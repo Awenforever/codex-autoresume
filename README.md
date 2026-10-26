@@ -122,7 +122,7 @@ detect    read-only scan of ~/.codex    │  goal parked? turn failed?
         ▼                               │
 plan      block model: wait for the 5h  │  resume when quota headroom
           window; weekly tracked across │  shows — no grace, no fake
-          blocks via measured t-ratio   │  numbers, `--` when unknown
+          blocks via pooled t-ratio     │  numbers, `--` when unknown
         ▼                               │
 resume    /goal  → thread/goal/set (official API), or the app's own
           "Resume goal" button via UIA when the app holds the writer

@@ -20,13 +20,17 @@ http://127.0.0.1:8765
 ```
 
 You can also double-click the desktop shortcut **CodexGuardPanel**. The panel
-shows quota rings (with drain ETAs estimated from the last 1h / 5h rates),
-reset-credit counts, and every recent conversation with its guard / weekly /
-credit switches and model / reasoning / resume-prompt settings.
+shows quota rings (drain ETAs simulated from the measured 5h burn rate and
+the pooled within-block weekly ratio, gated by the 5h block and the weekly
+reset — “Weekly resets first” when the weekly window would reset before
+running out), reset-credit counts, and every recent conversation with its
+guard / weekly / credit switches and model / reasoning / resume-prompt
+settings.
 
-也可以双击桌面快捷方式 **CodexGuardPanel**。面板里有额度环形仪表（含按
-近 1h / 5h 消耗速度预估的耗尽时间）、重置赠送计数、每个近期会话的
-守护/跨周/重置卡开关和模型/Reasoning/继续指令设置。
+也可以双击桌面快捷方式 **CodexGuardPanel**。面板里有额度环形仪表（耗尽
+时间按实测 5h 燃烧速度与跨块汇总的块内周额度比例推算，受 5h 分块与周
+重置约束——周额度会先重置时显示“周额度先重置”）、重置赠送计数、每个
+近期会话的守护/跨周/重置卡开关和模型/Reasoning/继续指令设置。
 
 > Asking Codex to call this plugin from a conversation works too, but the
 > conversation itself costs quota — use the panel for day-to-day control.
