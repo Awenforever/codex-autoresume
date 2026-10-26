@@ -120,18 +120,21 @@ class TestPlanner(unittest.TestCase):
         self.assertEqual(d.action, "wait")
         self.assertIn("quota gate", d.reason)
 
-    def test_quota_gate_attempts_when_deadline_near(self):
-        # deadline inside the attempt window -> try even if the flag lags
+    def test_quota_gate_waits_until_deadline(self):
+        # deadline ahead -> NEVER attempt early: a resume before the window
+        # actually resets appends another "usage limit" turn
         past = self.now - timedelta(minutes=10)
+        deadline = self.now + timedelta(minutes=20)
         snap = QuotaSnapshot(ordinary_usage_allowed=False,
                              primary=Window(used_percent=100,
-                                            resets_at=int((self.now + timedelta(minutes=20)).timestamp())))
+                                            resets_at=int(deadline.timestamp())))
         d = plan_for_thread(self.event("usage_primary", past),
                             ThreadState(tracked=True), base_cfg(), {},
                             thread_last_update_ms=int(self.now.timestamp() * 1000),
                             busy=False, now=self.now, snapshot=snap,
                             today=self.now.strftime("%Y-%m-%d"))
-        self.assertEqual(d.action, "due")
+        self.assertEqual(d.action, "wait")
+        self.assertGreaterEqual(d.wake_at, self.now)
 
     def test_quota_gate_advisory_after_deadline(self):
         # ordinaryUsageAllowed can lag reality: once the parsed reset time
@@ -157,6 +160,74 @@ class TestPlanner(unittest.TestCase):
                             busy=False, now=self.now, snapshot=snap,
                             today=self.now.strftime("%Y-%m-%d"))
         self.assertEqual(d.action, "due")
+
+    def test_future_reset_beats_trailing_99pct_snapshot(self):
+        # live bug: the interruption says the 5h window is empty until its
+        # reset, while the last snapshot still reads 99%. Resuming on that
+        # number appended a second "you've reached your limit" turn.
+        reset = self.now + timedelta(minutes=15)
+        snap = QuotaSnapshot(ordinary_usage_allowed=True,
+                             primary=Window(used_percent=99,
+                                            resets_at=int(reset.timestamp())))
+        d = plan_for_thread(self.event("usage_primary", reset),
+                            ThreadState(tracked=True), base_cfg(), {},
+                            thread_last_update_ms=int(self.now.timestamp() * 1000),
+                            busy=False, now=self.now, snapshot=snap,
+                            today=self.now.strftime("%Y-%m-%d"))
+        self.assertEqual(d.action, "wait")
+        self.assertGreaterEqual(d.wake_at, reset)
+        self.assertIn("interruption reset", d.reason)
+
+    def test_goal_paired_reset_beats_trailing_99pct_snapshot(self):
+        # goal rows have no reset time, but the paired failed turn does;
+        # goal_limited inherits it and must not fire on a 99% snapshot either
+        reset = self.now + timedelta(minutes=15)
+        snap = QuotaSnapshot(ordinary_usage_allowed=True,
+                             primary=Window(used_percent=99,
+                                            resets_at=int(reset.timestamp())))
+        ev = InterruptionEvent(thread_id="t1", kind="goal_limited",
+                               reset_at=reset, source="synthetic",
+                               goal_status="usage_limited")
+        t = ThreadState(tracked=True, is_goal=True)
+        d = plan_for_thread(ev, t, base_cfg(), {},
+                            thread_last_update_ms=int(self.now.timestamp() * 1000),
+                            busy=False, now=self.now, snapshot=snap,
+                            today=self.now.strftime("%Y-%m-%d"))
+        self.assertEqual(d.action, "wait")
+        self.assertGreaterEqual(d.wake_at, reset)
+
+    def test_weekly_event_waits_even_with_5h_headroom(self):
+        # a weekly-limit turn cannot be continued while the weekly window is
+        # still empty, no matter how much 5h headroom the snapshot shows
+        weekly_reset = self.now + timedelta(days=2)
+        snap = QuotaSnapshot(ordinary_usage_allowed=True,
+                             primary=Window(used_percent=20,
+                                            resets_at=int((self.now + timedelta(hours=3)).timestamp())),
+                             secondary=Window(used_percent=99,
+                                              resets_at=int(weekly_reset.timestamp())))
+        d = plan_for_thread(self.event("usage_weekly", weekly_reset),
+                            ThreadState(tracked=True),
+                            base_cfg(**{"general.weekly_resume": "all"}), {},
+                            thread_last_update_ms=int(self.now.timestamp() * 1000),
+                            busy=False, now=self.now, snapshot=snap,
+                            today=self.now.strftime("%Y-%m-%d"))
+        self.assertEqual(d.action, "wait")
+        self.assertGreaterEqual(d.wake_at, weekly_reset)
+
+    def test_weekly_exhaustion_blocks_primary_headroom(self):
+        # 5h refilled but the weekly window is empty: a resume fails instantly
+        past = self.now - timedelta(minutes=10)
+        snap = QuotaSnapshot(ordinary_usage_allowed=True,
+                             primary=Window(used_percent=10,
+                                            resets_at=int((self.now + timedelta(hours=4)).timestamp())),
+                             secondary=Window(used_percent=100,
+                                              resets_at=int((self.now + timedelta(days=3)).timestamp())))
+        d = plan_for_thread(self.event("usage_primary", past),
+                            ThreadState(tracked=True), base_cfg(), {},
+                            thread_last_update_ms=int(self.now.timestamp() * 1000),
+                            busy=False, now=self.now, snapshot=snap,
+                            today=self.now.strftime("%Y-%m-%d"))
+        self.assertEqual(d.action, "wait")
 
     def test_per_thread_cap(self):
         t = ThreadState(tracked=True, resume_count_today=12,

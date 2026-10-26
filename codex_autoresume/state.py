@@ -86,6 +86,11 @@ class WatcherState:
     # block is exhausted (nothing burns, so t is unmeasurable) and the
     # weekly quota is not itself exhausted
     last_weekly_eta: float | None = None
+    # first-hand quota-limit evidence: while an interruption says the 5h
+    # (or weekly) window is empty until <time>, a snapshot that still reads
+    # 99% is trailing and must not trigger resumes or the ring
+    limit_until_iso: str | None = None
+    limit_window: str | None = None     # "primary" | "weekly"
 
     # ------------------------------------------------------------------ io
 
@@ -136,6 +141,8 @@ def load_state(state_path: str) -> WatcherState:
             st.prev_primary_pct = raw.get("prev_primary_pct")
             st.prev_secondary_pct = raw.get("prev_secondary_pct")
             st.last_weekly_eta = raw.get("last_weekly_eta")
+            st.limit_until_iso = raw.get("limit_until_iso")
+            st.limit_window = raw.get("limit_window")
         except (ValueError, TypeError) as e:
             raise StateError("corrupt state file %s: %s" % (state_path, e)) from e
     return st
@@ -169,6 +176,8 @@ def _save_state_locked(st: WatcherState) -> None:
         "prev_primary_pct": st.prev_primary_pct,
         "prev_secondary_pct": st.prev_secondary_pct,
         "last_weekly_eta": st.last_weekly_eta,
+        "limit_until_iso": st.limit_until_iso,
+        "limit_window": st.limit_window,
     }
     tmp = st.state_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:

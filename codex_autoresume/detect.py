@@ -27,6 +27,7 @@ class InterruptionEvent:
     reset_at: datetime | None  # timezone-aware, None = unknown
     source: str               # turn:<turn_id> | goal
     detail: str = ""
+    goal_status: str = ""        # goal rows only: usage_limited / budget_limited / blocked
     occurred_at: datetime | None = None   # when the failure was recorded
     observed_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
 
@@ -92,6 +93,7 @@ def goal_events(goals: list[dict],
                 source="goal:%s:%s" % (g["thread_id"][:8], g.get("status")),
                 detail="goal status=%s objective=%.120s" % (
                     g.get("status"), str(g.get("objective") or "")),
+                goal_status=str(g.get("status") or ""),
                 occurred_at=occurred,
             ))
     return out

@@ -12,13 +12,9 @@ import random
 from .detect import InterruptionEvent
 from .ratelimits import QuotaSnapshot
 from .state import ThreadState
+from .timeparse import WEEKLY_THRESHOLD
 
 MAX_ATTEMPTS_BEFORE_PARK = 6
-# When the quota gate says "not recovered" but the reset deadline is closer
-# than this, attempt anyway (snapshot flags lag reality; a still-limited
-# resume fails instantly and reschedules itself). Farther out, wait quietly
-# so threads do not accumulate junk failed turns.
-GATE_ATTEMPT_WINDOW = timedelta(hours=1)
 
 
 @dataclass
@@ -100,14 +96,14 @@ def plan_for_thread(event: InterruptionEvent,
                         "(general.weekly_resume=%s)" % g["weekly_resume"],
                         kind=event.kind)
 
-    # --- goal guards fire only with real 5h headroom ----------------------
+    # --- goal guards fire only with real headroom in both windows ----------
     if (event.kind == "goal_limited" and snapshot is not None
-            and not snapshot.has_primary_headroom()):
-        nxt = snapshot.next_reset_epoch()
-        wake = (datetime.fromtimestamp(nxt).astimezone() if nxt
-                else now + timedelta(minutes=15))
-        return Decision("wait", event.thread_id,
-                        "goal parked but 5h window exhausted",
+            and not _window_headroom(snapshot)):
+        wake = _blocked_until(snapshot) or (now + timedelta(minutes=15))
+        reason = ("goal parked but 5h window exhausted"
+                  if (snapshot.primary.used_percent or 0) >= 100
+                  else "goal parked but weekly window exhausted")
+        return Decision("wait", event.thread_id, reason,
                         wake_at=wake, kind=event.kind)
 
     # --- thread sanity ----------------------------------------------------
@@ -165,12 +161,28 @@ def plan_for_thread(event: InterruptionEvent,
                             wake_at=now + timedelta(seconds=wait),
                             kind=event.kind)
 
-    # --- compute the earliest wake time ------------------------------------
+    # --- interruption evidence beats a trailing snapshot -------------------
+    # A usage-limit interruption is first-hand proof that the window was
+    # empty at that moment. The cached snapshot may still read 99% (poll
+    # cadence, backend lag); resuming on that number is exactly what
+    # appended duplicate "usage limit" turns to the conversation. Wait for
+    # the reset time carried by the interruption itself; trust the snapshot
+    # again only once it describes a clearly NEWER window.
     jitter = random.uniform(0, g["jitter_sec"])
+    if (event.kind in ("usage_primary", "usage_weekly", "goal_limited")
+            and event.reset_at is not None and event.reset_at > now
+            and not _snapshot_is_newer_window(event, snapshot, now)):
+        return Decision("wait", event.thread_id,
+                        "interruption reset %s not reached yet"
+                        % event.reset_at.isoformat(timespec="seconds"),
+                        wake_at=event.reset_at + timedelta(seconds=jitter),
+                        kind=event.kind)
+
+    # --- compute the earliest wake time ------------------------------------
     candidates: list[datetime] = []
-    # primary quota headroom is the ground-truth "5h 额度不为零" signal;
-    # ordinaryUsageAllowed can lag reality and only informs logging
-    quota_ok_now = snapshot.has_primary_headroom() if snapshot else False
+    # both windows must have headroom; a refilled 5h block cannot carry a
+    # weekly-exhausted account
+    quota_ok_now = _window_headroom(snapshot) if snapshot else False
     if quota_ok_now:
         # usage is already available: nothing to wait for
         candidates.append(now)
@@ -186,26 +198,26 @@ def plan_for_thread(event: InterruptionEvent,
     wake = min(candidates) if candidates else now
 
     # --- quota gate ---------------------------------------------------------
-    # Primary-window headroom is the real signal. Without headroom we wait
-    # quietly; within the attempt window near the reset deadline we still
-    # try (a still-limited resume fails instantly and reschedules itself).
+    # A window still marked empty with a reset time ahead of us is NOT
+    # recoverable yet: attempting early appends another limit message to the
+    # conversation. Only once the deadline has passed do we try (the reset
+    # boundary is not a whole minute and flags can lag; a still-limited
+    # resume fails instantly and reschedules itself).
     if snapshot is not None and now >= wake and not quota_ok_now:
         deadline = event.reset_at
-        if deadline is not None:
-            snap_reset = snapshot.next_reset_epoch()
-            if snap_reset:
-                snap_dt = datetime.fromtimestamp(snap_reset).astimezone()
-                deadline = max(deadline, snap_dt)
-        else:
+        blocked = _blocked_until(snapshot)
+        if blocked is not None:
+            deadline = max(deadline, blocked) if deadline else blocked
+        elif deadline is None:
             nxt = snapshot.next_reset_epoch()
             deadline = (datetime.fromtimestamp(nxt).astimezone()
                         if nxt else None)
-        if deadline is None or deadline - now <= GATE_ATTEMPT_WINDOW:
-            pass                     # near/at deadline: attempt below
+        if deadline is None or deadline <= now:
+            pass                     # reset reached: attempt below
         else:
             recheck = now + timedelta(seconds=cfg["limits_probe"]["poll_sec"])
             return Decision("wait", event.thread_id,
-                            "quota gate: 5h window exhausted "
+                            "quota gate: window empty "
                             "(reset %s away)" % deadline.isoformat(),
                             wake_at=recheck, kind=event.kind)
 
@@ -233,3 +245,47 @@ def pick_fallback_model(cfg: dict, tried: list[str]) -> str | None:
         if m not in tried:
             return m
     return None
+
+
+def _window_headroom(snapshot: QuotaSnapshot | None) -> bool:
+    """Quota available in BOTH windows.
+
+    A non-empty 5h block is useless when the weekly quota is gone (the
+    resume fails instantly and appends another limit message).
+    """
+    if snapshot is None:
+        return False
+    for w in (snapshot.primary, snapshot.secondary):
+        if w.used_percent is not None and w.used_percent >= 100:
+            return False
+    return True
+
+
+def _blocked_until(snapshot: QuotaSnapshot) -> datetime | None:
+    """Latest reset among exhausted windows: every one of them must refill."""
+    resets = []
+    for w in (snapshot.primary, snapshot.secondary):
+        if (w.used_percent is not None and w.used_percent >= 100
+                and w.resets_at):
+            resets.append(datetime.fromtimestamp(w.resets_at).astimezone())
+    return max(resets) if resets else None
+
+
+def _snapshot_is_newer_window(event: InterruptionEvent,
+                              snapshot: QuotaSnapshot | None,
+                              now: datetime) -> bool:
+    """True when the snapshot's reset lies clearly after the event's reset.
+
+    That means the snapshot describes a window which STARTED after the
+    interruption, so its headroom is genuine and the interruption is stale.
+    """
+    if snapshot is None or event.reset_at is None:
+        return False
+    weekly = (event.kind == "usage_weekly" or
+              (event.kind == "goal_limited" and
+               event.reset_at - now > WEEKLY_THRESHOLD))
+    w = snapshot.secondary if weekly else snapshot.primary
+    if not w.resets_at:
+        return False
+    snap_reset = datetime.fromtimestamp(w.resets_at).astimezone()
+    return snap_reset > event.reset_at + timedelta(minutes=5)

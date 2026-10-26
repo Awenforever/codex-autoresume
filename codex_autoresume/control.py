@@ -44,6 +44,9 @@ color-scheme:light}
 body{background:var(--bg);color:var(--fg);font:14px/1.55 -apple-system,"Segoe UI",
 "Microsoft YaHei",sans-serif;padding:20px 18px 44px;max-width:940px;margin:0 auto;
 -webkit-font-smoothing:antialiased}
+body.theming,body.theming *{transition:background-color .35s ease,color .35s ease,
+border-color .35s ease,box-shadow .35s ease,stroke .35s ease,fill .35s ease}
+body.theming .ring .val{transition:stroke-dashoffset .6s,stroke .35s ease}
 header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
 .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,
 #10a37f,#0a6e56);display:flex;align-items:center;justify-content:center;
@@ -309,14 +312,10 @@ function gstat(x){var k="g_"+String(x||"");var v=I18N[LNG][k];
 return (v===undefined)?String(x||""):v}
 function fmt(v){return (v===null||v===undefined)?"--":v}
 function lerp(a,b,t){return Math.round(a+(b-a)*t)}
-function hex2rgb(h){return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]}
-function themeRGB(name,fb){
- try{var v=getComputedStyle(document.body).getPropertyValue(name).trim();
-  if(/^#[0-9a-f]{6}$/i.test(v))return hex2rgb(v);
-  var m=v.match(/(\d+)\D+(\d+)\D+(\d+)/);if(m)return [+m[1],+m[2],+m[3]]}catch(e){}
- return fb}
 function ringColor(p){
- var G=themeRGB("--accent",[16,163,127]),A=themeRGB("--warn",[224,163,65]),R=themeRGB("--danger",[229,83,75]),c;
+ /* ring palette is theme-independent on purpose: the quota pressure
+    colors must read the same in dark and light mode */
+ var G=[16,163,127],A=[224,163,65],R=[229,83,75],c;
  if(p<=50){c=G}else if(p<=80){var t=(p-50)/30;c=[lerp(G[0],A[0],t),lerp(G[1],A[1],t),lerp(G[2],A[2],t)]}
  else{var t2=(p-80)/20;c=[lerp(A[0],R[0],t2),lerp(A[1],R[1],t2),lerp(A[2],R[2],t2)]}
  return "rgb("+c[0]+","+c[1]+","+c[2]+")"}
@@ -579,7 +578,11 @@ try{document.documentElement.style.colorScheme=THEME}catch(e){}
 }
 function toggleTheme(){THEME=(THEME==="light")?"dark":"light";
 try{localStorage.setItem("cgtheme",THEME)}catch(e){}
-applyTheme();if(typeof refresh==='function')refresh()}
+var b=document.body;b.classList.add("theming");
+applyTheme();
+clearTimeout(toggleTheme._t);
+toggleTheme._t=setTimeout(function(){b.classList.remove("theming")},420);
+if(typeof refresh==='function')refresh()}
 applyTheme();applyLang();refresh();setInterval(refresh,15000);
 document.addEventListener("visibilitychange",function(){
 if(!document.hidden){refresh()}});
@@ -705,7 +708,11 @@ class ControlApi:
                               else None),
                 "updated_ms": info.updated_at_ms,
             })
-        snap = d._snapshot
+        # show what the planner acts on: first-hand interruption evidence
+        # overrides a snapshot that still trails at 99% after the account
+        # already refused a turn
+        _eff = getattr(d, "_effective_snapshot", None)
+        snap = _eff(d._snapshot) if _eff else d._snapshot
         quota = None
         if snap:
             import time as _time

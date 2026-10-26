@@ -40,6 +40,13 @@ def _now() -> datetime:
     return datetime.now().astimezone()
 
 
+# The window boundary is not a whole minute ("try again at 15:37" can mean
+# 15:37:xx). Hold interruption evidence one minute past the parsed time so
+# a resume can never land on the wrong side of the reset and append another
+# limit message to the conversation.
+LIMIT_GRACE = timedelta(seconds=60)
+
+
 def _today(now: datetime | None = None) -> str:
     return (now or _now()).strftime("%Y-%m-%d")
 
@@ -179,10 +186,10 @@ class Daemon:
                         if g.get("status") in ("usage_limited", "budget_limited",
                                                "blocked")}
         busy = codex.busy_threads()
-        snapshot = self._quota_snapshot(force=bool(self._need_snapshot()))
-        self._maybe_consume_reset_card(snapshot)
 
-        # fold new events into thread states
+        # fold new events into thread states FIRST: the interruption's own
+        # reset time is first-hand evidence and must be on record even when
+        # the snapshot fetch fails
         for e in events:
             t = self.state.thread(e.thread_id)
             if e.kind == "goal_limited" or e.thread_id in goal_threads:
@@ -191,6 +198,23 @@ class Daemon:
             if e.reset_at is not None:
                 t.last_reset_at = e.reset_at.isoformat()
             self._maybe_track(t, e)
+
+        # re-derive the window limit from persisted thread evidence (state
+        # written before the field existed, or a crash between the two)
+        self._restore_limit_evidence()
+
+        # a new quota-limit interruption means the cached snapshot may trail
+        # by a minute in the UNSAFE direction (99% while actually empty):
+        # one extra fetch per interruption, never per tick
+        new_limit_evidence = any(
+            e.kind in ("usage_primary", "usage_weekly")
+            or (e.kind == "goal_limited" and e.goal_status == "usage_limited")
+            for e in events)
+        raw = self._quota_snapshot(
+            force=new_limit_evidence or self._need_snapshot())
+        self._note_limit_evidence(events, raw)
+        snapshot = self._effective_snapshot(raw)
+        self._maybe_consume_reset_card(snapshot)
 
         # goal status is current state: a USER-GUARDED goal that is (again)
         # parked by a limit must be re-armed every tick so it keeps being
@@ -436,9 +460,16 @@ class Daemon:
             log.info("reset credit consumed for weekly-exhausted guarded "
                      "threads (%s): %s", [tid[:8] for tid, _ in qualifying],
                      json.dumps(result, ensure_ascii=False)[:200])
+            # the credit refilled the account: the evidence that parked
+            # these threads is obsolete, and the next tick must re-read
+            # usage instead of re-using the pre-credit snapshot
+            self._clear_limit()
+            self._snapshot_at = 0.0
             for tid, t in qualifying:
                 t.append_history({"at": _now().isoformat(),
                                   "kind": "reset_card_consumed", "ok": True})
+                t.last_kind = ""
+                t.last_reset_at = None       # do not resurrect the limit
                 t.next_wake_iso = None       # re-evaluate next tick
                 self._notify(tid, "reset_card_consumed")
             save_state(self.state)
@@ -500,6 +531,151 @@ class Daemon:
                      len(self._snapshot.reset_credits))
         return self._snapshot
 
+    # ------------------------------------------------ quota-limit evidence
+    #
+    # The backend usage number trails an exhaustion by up to a poll interval
+    # (and can keep reading 99% while the account already refuses turns).
+    # An interruption itself is first-hand proof: its reset time is the
+    # moment the window is known to be empty until. That evidence is
+    # persisted (limit_until_iso/limit_window) so it survives restarts and
+    # drives BOTH resuming and the panel ring; raw numbers stay untouched
+    # for sampling and reset detection.
+
+    def _active_limit(self) -> tuple[str, datetime] | None:
+        st = self.state
+        if st is None or not st.limit_until_iso:
+            return None
+        try:
+            until = datetime.fromisoformat(st.limit_until_iso)
+        except ValueError:
+            st.limit_until_iso = None
+            st.limit_window = None
+            return None
+        if _now() >= until:
+            st.limit_until_iso = None
+            st.limit_window = None
+            return None
+        return (st.limit_window or "primary", until)
+
+    def _set_limit(self, window: str, until: datetime | None) -> None:
+        """Assert a window limit until *until* (extend only, future only)."""
+        if until is None or until <= _now():
+            return
+        until = until + LIMIT_GRACE
+        cur = self._active_limit()
+        if cur is not None and cur[1] >= until:
+            return
+        self.state.limit_window = window
+        self.state.limit_until_iso = until.isoformat()
+        log.info("quota-limit evidence: %s window empty until %s",
+                 window, until.isoformat(timespec="seconds"))
+
+    def _clear_limit(self, window: str | None = None) -> None:
+        st = self.state
+        if st is None or not st.limit_until_iso:
+            return
+        if window is not None and st.limit_window not in (None, window):
+            return
+        st.limit_until_iso = None
+        st.limit_window = None
+        log.info("quota-limit evidence cleared%s",
+                 (" (%s window reset)" % window) if window else "")
+
+    def _restore_limit_evidence(self) -> None:
+        """Re-derive the limit from persisted thread evidence.
+
+        Covers state written before this field existed and a crash between
+        the event fold and the state save.
+        """
+        from .timeparse import classify_window
+        now = _now()
+        for t in self.state.threads.values():
+            if not (t.tracked or t.manual) or not t.last_reset_at:
+                continue
+            if t.last_kind not in ("usage_primary", "usage_weekly",
+                                   "goal_limited"):
+                continue
+            try:
+                reset = datetime.fromisoformat(t.last_reset_at)
+            except ValueError:
+                continue
+            if reset > now:
+                window = ("weekly" if classify_window(reset) == "weekly"
+                          else "primary")
+                self._set_limit(window, reset)
+
+    def _note_limit_evidence(self, events, raw: QuotaSnapshot | None) -> None:
+        """Turn interruption evidence into a persisted window limit."""
+        from .timeparse import classify_window
+        now = _now()
+        for e in events:
+            if e.kind in ("usage_primary", "usage_weekly"):
+                window = "weekly" if e.kind == "usage_weekly" else "primary"
+                if e.reset_at is not None and e.reset_at > now:
+                    self._set_limit(window, e.reset_at)
+                    continue
+                # reset time absent/unparsable: the CURRENT window's reset is
+                # still the right boundary; only fall back to a blind block
+                w = ((raw.secondary if window == "weekly" else raw.primary)
+                     if raw is not None else None)
+                if w is not None and w.resets_at:
+                    until = datetime.fromtimestamp(w.resets_at).astimezone()
+                    if until > now:
+                        self._set_limit(window, until)
+                        continue
+                self._set_limit(
+                    window,
+                    now + (timedelta(hours=1) if window == "weekly"
+                           else timedelta(minutes=15)))
+                continue
+            if e.kind != "goal_limited":
+                continue
+            t = self.state.threads.get(e.thread_id)
+            reset = None
+            if t is not None and t.last_reset_at:
+                try:
+                    reset = datetime.fromisoformat(t.last_reset_at)
+                except ValueError:
+                    reset = None
+            if reset is not None and reset > now:
+                self._set_limit(
+                    "weekly" if classify_window(reset) == "weekly" else "primary",
+                    reset)
+            elif (e.goal_status == "usage_limited" and raw is not None
+                  and (raw.secondary.used_percent or 0) >= 99
+                  and raw.secondary.resets_at):
+                # goal rows carry no reset time; only extend the limit when
+                # the snapshot itself corroborates exhaustion
+                self._set_limit(
+                    "weekly",
+                    datetime.fromtimestamp(raw.secondary.resets_at).astimezone())
+
+    def _effective_snapshot(self, snap: QuotaSnapshot | None) -> QuotaSnapshot | None:
+        """Snapshot with first-hand evidence applied (never mutates raw).
+
+        Planning, the reset-card gate and the panel see the window that an
+        interruption proved empty as 100% (ring + ETAs follow); sampling
+        and reset detection keep using the raw numbers.
+        """
+        if snap is None:
+            return None
+        lim = self._active_limit()
+        if lim is None:
+            return snap
+        window = lim[0]
+        w = snap.primary if window == "primary" else snap.secondary
+        if w.used_percent is not None and w.used_percent >= 100:
+            return snap
+        import copy
+        eff = copy.copy(snap)
+        eff.primary = copy.copy(snap.primary)
+        eff.secondary = copy.copy(snap.secondary)
+        if window == "primary":
+            eff.primary.used_percent = 100
+        else:
+            eff.secondary.used_percent = 100
+        return eff
+
     def _log_announcement(self, ann: dict | None) -> None:
         """Keep news_log as a normalized mirror of the tracker's timeline.
 
@@ -560,6 +736,9 @@ class Daemon:
                 for ev in events:
                     log.info("reset observed: %s window rolled over at %s",
                              ev["kind"], ev["at"])
+                    # the window really rolled: its interruption evidence is
+                    # spent, snapshots are authoritative again
+                    self._clear_limit(ev["kind"])
             elif cur_p is not None or cur_s is not None:
                 # persist the moved baseline even without events
                 save_state(st)
@@ -616,6 +795,16 @@ class Daemon:
     # -------------------------------------------------------------- resumes
 
     def _launch_resume(self, thread_id: str, t, decision, info) -> None:
+        # send-time recheck: an interruption may have established a window
+        # limit while this decision was being made
+        lim = self._active_limit()
+        if lim is not None:
+            window, until = lim
+            log.info("%s resume deferred: %s window empty until %s "
+                     "(interruption evidence)", thread_id[:8], window,
+                     until.isoformat(timespec="seconds"))
+            t.next_wake_iso = until.isoformat()
+            return
         with self._inflight_lock:
             if thread_id in self._inflight:
                 log.debug("%s resume already in flight", thread_id[:8])
@@ -648,19 +837,27 @@ class Daemon:
         try:
             r = self.cfg["resume"]
             prompt = decision.prompt or r["prompt_generic"]
+            t = self.state.thread(thread_id)
+            lim = self._active_limit()
+            if lim is not None:
+                window, until = lim
+                log.info("%s resume deferred in worker: %s window empty "
+                         "until %s (interruption evidence)", thread_id[:8],
+                         window, until.isoformat(timespec="seconds"))
+                t.next_wake_iso = until.isoformat()
+                save_state(self.state)
+                return
             if self.cfg["general"]["dry_run"]:
                 log.info("[dry-run] would resume %s (model=%s effort=%s "
                          "mode=%s) prompt=%.80s", thread_id[:8],
                          decision.model, decision.reasoning_effort,
                          decision.mode, prompt)
-                t = self.state.thread(thread_id)
                 t.append_history({"at": _now().isoformat(),
                                   "kind": "dry_run_skipped", "ok": None,
                                   "model": decision.model})
                 t.last_outcome = "dry_run_skipped"
                 save_state(self.state)
                 return
-            t = self.state.thread(thread_id)
             if t.is_goal:
                 # goal threads are ONLY ever continued via the official
                 # goal-continue action -- never via injected messages, even
@@ -908,13 +1105,24 @@ class Daemon:
                 save_state(self.state)
                 return
             t.fail_streak += 1
-            if outcome.kind == "usage_limit" and outcome.reset_at_iso:
+            if outcome.kind == "usage_limit":
                 from .timeparse import classify_window
-                reset = datetime.fromisoformat(outcome.reset_at_iso)
-                t.last_kind = ("usage_weekly"
-                               if classify_window(reset) == "weekly"
+                reset = None
+                if outcome.reset_at_iso:
+                    try:
+                        reset = datetime.fromisoformat(outcome.reset_at_iso)
+                    except ValueError:
+                        reset = None
+                if reset is None or reset <= _now():
+                    # the attempt just failed on quota: treat the window as
+                    # empty even when the message carried no usable clock
+                    reset = _now() + timedelta(minutes=15)
+                window = ("weekly" if classify_window(reset) == "weekly"
+                          else "primary")
+                self._set_limit(window, reset)
+                t.last_kind = ("usage_weekly" if window == "weekly"
                                else "usage_primary")
-                t.last_reset_at = outcome.reset_at_iso
+                t.last_reset_at = reset.isoformat()
             elif outcome.kind == "overloaded":
                 t.last_kind = "server_overloaded"
             log.warning("resume %s -> %s%s", thread_id[:8], outcome.kind,

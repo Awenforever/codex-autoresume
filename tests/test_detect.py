@@ -128,6 +128,8 @@ class TestDetect(unittest.TestCase):
         self.assertIn(("t-weekly", "usage_weekly"), kinds)
         self.assertIn(("t-overload", "server_overloaded"), kinds)
         self.assertIn(("t-goal", "goal_limited"), kinds)
+        goal = [e for e in events if e.thread_id == "t-goal"][0]
+        self.assertEqual(goal.goal_status, "usage_limited")
         self.assertNotIn(("t-ok", "completed"), kinds)
 
     def test_rollout_alias_canonicalization(self):
