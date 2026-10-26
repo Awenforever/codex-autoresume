@@ -34,8 +34,9 @@ Codex Guard does that for you, and it does it the way you would:
 - **Weekly quota guard + reset credits.** Optionally keeps a goal alive
   across the weekly reset, and can spend an official reset credit
   automatically when the weekly quota runs dry (opt-in per thread).
-- **A control panel worth opening.** Dark, bilingual (CN/EN), dual
-  analog clocks (local + Pacific), pressure-colored quota rings, the
+- **A control panel worth opening.** Dark & light themes (follows your
+  system, remembers your pick), bilingual (CN/EN), dual analog clocks
+  (local + Pacific), pressure-colored quota rings, the
   official reset forecast / observed landing / news log — served on
   `127.0.0.1:8765`, costs no quota.
 - **Private and honest by design.** Reads Codex's local databases
@@ -196,7 +197,7 @@ ChatGPT 的额度限制（5 小时窗口 / 周额度）打断 Codex 任务时，
 - **goal 用官方方式继续。** 桌面应用占用会话时，通过 UI 自动化点击应用自己的 **Resume goal** 按钮（等价于你亲手点）；未占用时走官方 `thread/goal/set` 接口。**绝不**注入伪造的聊天消息。
 - **每次恢复可指定模型与推理强度。** 每个会话可固定自动恢复时的 model / reasoning，也可继承线程设置。
 - **周额度守护 + 重置卡。** 可选择让 goal 跨越周重置继续跑；周额度耗尽且账户有官方重置卡时可自动消耗（按会话开启）。
-- **值得打开的控制面板。** 暗色主题、中英双语、双模拟时钟（本机 + 太平洋时间）、压力渐变的额度环、官方重置预告 / 实测到账 / 动态日志——挂在 `127.0.0.1:8765`，不消耗额度。
+- **值得打开的控制面板。** 深色 / 浅色双主题（跟随系统、记忆选择）、中英双语、双模拟时钟（本机 + 太平洋时间）、压力渐变的额度环、官方重置预告 / 实测到账 / 动态日志——挂在 `127.0.0.1:8765`，不消耗额度。
 - **私有且诚实。** 只读扫描 Codex 本地数据库 + 一次经系统代理的轻量用量轮询；无遥测、无账号、面板仅限本机。所有 ETA 均为实测——测不出来就显示 `--`，绝不编数字。
 
 ### 🚀 30 秒上手
