@@ -288,13 +288,82 @@ class TestPlanner(unittest.TestCase):
         self.assertEqual(d.action, "skip")
         self.assertIn("parked", d.reason)
 
-    def test_overloaded_tracks_with_cooldown(self):
+    def test_overloaded_retries_after_cooldown(self):
+        # "Selected model is at capacity" is not a task blockage: it must
+        # become an actual retry, not a thread that is merely "tracked"
         d = plan_for_thread(self.event("server_overloaded"),
                             ThreadState(tracked=True), base_cfg(), {},
                             thread_last_update_ms=int(self.now.timestamp() * 1000),
                             busy=False, now=self.now, snapshot=None,
                             today=self.now.strftime("%Y-%m-%d"))
-        self.assertEqual(d.action, "track")
+        self.assertEqual(d.action, "due")
+        self.assertIn("capacity", d.reason)
+        self.assertIsNotNone(d.prompt)
+
+    def test_overloaded_waits_between_attempts(self):
+        # an attempt 60s ago is still inside the per-thread minimum spacing
+        # (300s here), which wins over the shorter capacity backoff
+        t = ThreadState(tracked=True,
+                        last_resume_iso=(self.now - timedelta(seconds=60)).isoformat())
+        d = plan_for_thread(self.event("server_overloaded"),
+                            t, base_cfg(), {},
+                            thread_last_update_ms=int(self.now.timestamp() * 1000),
+                            busy=False, now=self.now, snapshot=None,
+                            today=self.now.strftime("%Y-%m-%d"))
+        self.assertEqual(d.action, "wait")
+        self.assertGreaterEqual(d.wake_at,
+                                self.now + timedelta(seconds=100))
+
+    def test_overloaded_backs_off_exponentially(self):
+        # streak 4 -> 180s * 2^3 = 24 min between attempts
+        t = ThreadState(tracked=True, overload_streak=4,
+                        last_resume_iso=(self.now - timedelta(seconds=300)).isoformat())
+        d = plan_for_thread(self.event("server_overloaded"),
+                            t, base_cfg(), {},
+                            thread_last_update_ms=int(self.now.timestamp() * 1000),
+                            busy=False, now=self.now, snapshot=None,
+                            today=self.now.strftime("%Y-%m-%d"))
+        self.assertEqual(d.action, "wait")
+        self.assertGreaterEqual(d.wake_at,
+                                self.now + timedelta(seconds=1000))
+
+    def test_overloaded_quota_gate_still_applies(self):
+        snap = QuotaSnapshot(ordinary_usage_allowed=False,
+                             primary=Window(used_percent=100,
+                                            resets_at=int((self.now + timedelta(hours=2)).timestamp())))
+        d = plan_for_thread(self.event("server_overloaded"),
+                            ThreadState(tracked=True), base_cfg(), {},
+                            thread_last_update_ms=int(self.now.timestamp() * 1000),
+                            busy=False, now=self.now, snapshot=snap,
+                            today=self.now.strftime("%Y-%m-%d"))
+        self.assertEqual(d.action, "wait")
+        self.assertGreaterEqual(d.wake_at,
+                                self.now + timedelta(minutes=90))
+
+    def test_overloaded_not_charged_to_daily_cap(self):
+        today = self.now.strftime("%Y-%m-%d")
+        t = ThreadState(tracked=True, resume_count_today=12,
+                        resume_count_day=today)
+        d = plan_for_thread(self.event("server_overloaded"),
+                            t, base_cfg(), {},
+                            thread_last_update_ms=int(self.now.timestamp() * 1000),
+                            busy=False, now=self.now, snapshot=None,
+                            today=today)
+        self.assertEqual(d.action, "due")
+
+    def test_overloaded_wait_follows_capacity_backoff(self):
+        # the base retry spacing is 180s even when min_resume_interval is low
+        cfg = base_cfg(**{"general.min_resume_interval_sec": 30})
+        t = ThreadState(tracked=True, overload_streak=2,
+                        last_resume_iso=(self.now - timedelta(seconds=60)).isoformat())
+        d = plan_for_thread(self.event("server_overloaded"),
+                            t, cfg, {},
+                            thread_last_update_ms=int(self.now.timestamp() * 1000),
+                            busy=False, now=self.now, snapshot=None,
+                            today=self.now.strftime("%Y-%m-%d"))
+        self.assertEqual(d.action, "wait")
+        self.assertGreaterEqual(d.wake_at,
+                                self.now + timedelta(seconds=250))
 
     def test_settings_precedence(self):
         cfg = base_cfg(**{"resume.model": "global-model",

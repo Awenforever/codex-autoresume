@@ -263,7 +263,7 @@ postAt:"动态发布时间",exhausted:"已耗尽",newsWin:"近 48 小时",clkLoc
 tipModel:"每次自动恢复时使用的模型/推理强度；选「继承」则沿用对话自身设置",
 tipModelGoal:"/goal 会话由桌面应用驱动，固定沿用对话自身设置，因此锁定为继承",g_usage_limited:"额度受限",g_budget_limited:"预算受限",g_active:"运行中",
 g_paused:"已暂停",g_blocked:"受阻",g_complete:"已完成",
-goalOK:"✓ 已自动继续",uiaOK:"✓ 已点继续",writerBusy:"会话被 Codex 应用占用，切走/关闭后自动接管",quotaWait:"等待额度",
+goalOK:"✓ 已自动继续",uiaOK:"✓ 已点继续",writerBusy:"会话被 Codex 应用占用，切走/关闭后自动接管",quotaWait:"等待额度",capacityWait:"等待模型容量",
 errConn:"无法连接守护进程：",errTimeout:"请求超时（8 秒无响应）",errFail:"连接失败",
 errHint:"。请点右上角「刷新」重试；若反复失败，启动：",
 upd:"已更新",restored:"已恢复默认指令",pauseOK:"守护已暂停",resumeOK:"守护已恢复",
@@ -289,7 +289,7 @@ postAt:"post publication time",exhausted:"Exhausted",newsWin:"last 48h",clkLocal
 tipModel:"Model/reasoning used for every automatic resume; Inherit keeps the conversation's own settings",
 tipModelGoal:"/goal threads are driven by the desktop app and always use their own settings, so they stay locked",g_usage_limited:"quota-limited",g_budget_limited:"budget-limited",g_active:"active",
 g_paused:"paused",g_blocked:"blocked",g_complete:"complete",
-goalOK:"✓ auto-continued",uiaOK:"✓ Continue clicked",writerBusy:"held by the Codex app; guard resumes once released",quotaWait:"waiting for quota",
+goalOK:"✓ auto-continued",uiaOK:"✓ Continue clicked",writerBusy:"held by the Codex app; guard resumes once released",quotaWait:"waiting for quota",capacityWait:"waiting for model capacity",
 errConn:"Cannot reach guard daemon: ",errTimeout:"request timed out (8s)",
 errFail:"connection failed",
 errHint:". Click Refresh (top-right); if it persists start: ",
@@ -458,7 +458,7 @@ var badges=(t.is_goal?'<span class="badge goal">GOAL</span>':"")+
 esc(t.run==="running"?L("stRunning"):L("stWaiting"))+"</span>":"");
 var tries=(t.attempts&&t.attempts>t.resumes)?(L("tryPfx")+t.attempts+L("trySfx")):"";
 var oc=t.last_outcome;
-var ocMap={"goal_continue":"goalOK","uia_continue":"uiaOK","writer_busy":"writerBusy","usage_limit":"quotaWait"};
+var ocMap={"goal_continue":"goalOK","uia_continue":"uiaOK","writer_busy":"writerBusy","usage_limit":"quotaWait","capacity_wait":"capacityWait","server_overloaded":"capacityWait","overloaded":"capacityWait"};
 var ocTxt=oc?(L(ocMap[oc]||"")!==ocMap[oc]?L(ocMap[oc]):esc(oc)):"";
 var cq0=s.quota||{};
 var cc0=(cq0.credits_count!==undefined)?cq0.credits_count:cq0.credits;

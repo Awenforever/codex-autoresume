@@ -36,6 +36,11 @@ class ThreadState:
     last_reset_at: str | None = None    # ISO
     next_wake_iso: str | None = None
     last_resume_iso: str | None = None
+    # capacity ("Selected model is at capacity") retry bookkeeping: the model
+    # that hit capacity last and how many consecutive hits we have seen
+    # (drives the planner's exponential backoff)
+    overload_model: str | None = None
+    overload_streak: int = 0
     resume_count_today: int = 0
     resume_count_day: str = ""          # YYYY-MM-DD bucket
     total_resumes: int = 0             # attempts (budget cap counter)

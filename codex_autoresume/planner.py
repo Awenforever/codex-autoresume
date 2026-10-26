@@ -108,12 +108,6 @@ def plan_for_thread(event: InterruptionEvent,
 
     # --- thread sanity ----------------------------------------------------
     age_hours = max(0.0, (now.timestamp() * 1000 - thread_last_update_ms) / 3600000)
-    if event.kind == "server_overloaded":
-        # capacity errors are short-lived: retry soon with the fallback chain
-        wake = now + timedelta(seconds=g["server_overloaded_cooldown_sec"])
-        return Decision("track", event.thread_id,
-                        "server overloaded; retry after cooldown",
-                        wake_at=wake, kind=event.kind)
 
     # --- tracking gate ----------------------------------------------------
     if not (tstate.tracked or tstate.manual):
@@ -143,7 +137,11 @@ def plan_for_thread(event: InterruptionEvent,
     if tstate.resume_count_day != today:
         tstate.resume_count_day = today
         tstate.resume_count_today = 0
-    if tstate.resume_count_today >= settings.per_thread_cap:
+    # capacity retries are not charged to the daily budgets (see the backoff
+    # block below), so an exhausted budget from other interruptions must not
+    # veto them either
+    if (event.kind != "server_overloaded"
+            and tstate.resume_count_today >= settings.per_thread_cap):
         return Decision("skip", event.thread_id,
                         "per-thread daily resume cap reached (%d)"
                         % settings.per_thread_cap, kind=event.kind)
@@ -160,6 +158,31 @@ def plan_for_thread(event: InterruptionEvent,
                             "resume cooldown (%.0fs left)" % wait,
                             wake_at=now + timedelta(seconds=wait),
                             kind=event.kind)
+
+    # --- transient capacity errors: retry with backoff, never park --------
+    # "Selected model is at capacity. Please try a different model." says
+    # nothing about the task (it is not a question to the user, not a blocked
+    # step); it only means this model's pool is full right now. Retrying is
+    # exactly the app's own Retry button. Each consecutive hit backs off
+    # (3m, 6m, 12m, 24m, then 48m) so a long outage keeps being guarded
+    # without hammering the API.
+    due_reason = "reset window passed; resuming"
+    if event.kind == "server_overloaded":
+        cooldown = float(g["server_overloaded_cooldown_sec"])
+        cooldown *= min(16, 2 ** min(max(0, int(tstate.overload_streak) - 1), 4))
+        if tstate.last_resume_iso:
+            try:
+                since = (now - datetime.fromisoformat(
+                    tstate.last_resume_iso)).total_seconds()
+            except ValueError:
+                since = None
+            if since is not None and since < cooldown:
+                wait = cooldown - since
+                return Decision("wait", event.thread_id,
+                                "model at capacity; retrying in %.0fs" % wait,
+                                wake_at=now + timedelta(seconds=wait),
+                                kind=event.kind)
+        due_reason = "model at capacity; retrying"
 
     # --- interruption evidence beats a trailing snapshot -------------------
     # A usage-limit interruption is first-hand proof that the window was
@@ -229,7 +252,7 @@ def plan_for_thread(event: InterruptionEvent,
                         kind=event.kind)
 
     if now >= wake:
-        return Decision("due", event.thread_id, "reset window passed; resuming",
+        return Decision("due", event.thread_id, due_reason,
                         kind=event.kind,
                         model=settings.model, reasoning_effort=settings.reasoning_effort,
                         prompt=(settings.prompt_goal if tstate.is_goal

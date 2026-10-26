@@ -117,6 +117,19 @@ detect (read-only sqlite)  ──▶  planner (pure logic)  ──▶  daemon lo
 - **Queue vs exec modes**: `exec` is default (model overrides, headless);
   `queue` delivers into the running desktop app for users who want to watch
   it happen in the UI.
+- **Capacity is transient, not a task blockage**: `serverOverloaded`
+  ("Selected model is at capacity") parks goals and fails resume attempts,
+  but says nothing about the task itself. Both paths keep retrying — goals
+  via the official `thread/goal/set` continue, ordinary threads via the
+  continue prompt — with exponential backoff (3m → 48m) seeded by
+  `general.server_overloaded_cooldown_sec`, rotating
+  `general.fallback_models` away from the model that just failed. These
+  retries never consume the daily resume budgets nor the failure streak
+  that parks a thread.
+- **Quota-limit interruptions are first-hand evidence**: a turn that failed
+  with `usageLimitExceeded` proves the window was empty at that moment, so
+  its reset time overrides a trailing snapshot (which may still read 99%)
+  until a clearly newer window is observed.
 - **Weekly policy is opt-in** because a multi-day parked watcher silently
   burning a fresh weekly window is a bigger decision than a 5-hour one;
   `weekly_resume = "per-thread"` + `threads.<id>.weekly_resume = true`

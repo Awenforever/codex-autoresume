@@ -190,11 +190,21 @@ class Daemon:
         # fold new events into thread states FIRST: the interruption's own
         # reset time is first-hand evidence and must be on record even when
         # the snapshot fetch fails
+        capacity_threads = {e.thread_id for e in events
+                            if e.kind == "server_overloaded"}
         for e in events:
             t = self.state.thread(e.thread_id)
             if e.kind == "goal_limited" or e.thread_id in goal_threads:
                 t.is_goal = True
-            t.last_kind = e.kind
+            if e.kind == "goal_limited" and e.thread_id in capacity_threads:
+                # the goal parked in the same tick its turn hit "model at
+                # capacity": capacity is the cause, not a quota window, and
+                # the transient kind keeps the thread on the retry path
+                t.last_kind = "server_overloaded"
+            else:
+                t.last_kind = e.kind
+            if e.kind == "server_overloaded":
+                t.overload_streak += 1
             if e.reset_at is not None:
                 t.last_reset_at = e.reset_at.isoformat()
             self._maybe_track(t, e)
@@ -234,7 +244,9 @@ class Daemon:
             # (the thread may also be tracked via turn-failure events)
             if ((t.tracked or t.manual) and t.last_outcome in
                     ("goal_continue", "uia_continue")):
-                t.last_outcome = "quota_wait"
+                t.last_outcome = ("capacity_wait"
+                                  if t.last_kind == "server_overloaded"
+                                  else "quota_wait")
 
         # re-derive wake times for tracked threads every tick (config may
         # change; snapshot reset times may arrive later)
@@ -274,6 +286,11 @@ class Daemon:
                         decision.model = info.model
                     if not decision.reasoning_effort and info.reasoning_effort:
                         decision.reasoning_effort = info.reasoning_effort
+                if decision.kind == "server_overloaded":
+                    # the model that just failed at capacity is the one NOT
+                    # to retry first: walk the configured fallback chain
+                    decision.model = self._capacity_model(
+                        thread_id, t, decision.model)
                 self._launch_resume(thread_id, t, decision, info)
 
         # warm slow external caches off the HTTP path: /api/status serves
@@ -865,13 +882,19 @@ class Daemon:
                 return
             self._inflight[thread_id] = time.monotonic()
         g = self.cfg["general"]
-        if not self.state.bump_global_counter(_today(), g["max_resumes_per_day"]):
+        if decision.kind == "server_overloaded":
+            # a capacity outage can last hours; the exponential backoff in
+            # the planner paces these retries. Charging them to the daily
+            # resume budgets would silently end guarding for the rest of the
+            # day while the model pool is still full.
+            t.total_resumes += 1
+        elif not self.state.bump_global_counter(_today(), g["max_resumes_per_day"]):
             log.warning("global daily resume cap reached; not resuming %s",
                         thread_id[:8])
             with self._inflight_lock:
                 self._inflight.pop(thread_id, None)
             return
-        if not t.bump_resume_counter(_today(), self._thread_cap(thread_id)):
+        elif not t.bump_resume_counter(_today(), self._thread_cap(thread_id)):
             log.warning("per-thread daily cap reached for %s", thread_id[:8])
             with self._inflight_lock:
                 self._inflight.pop(thread_id, None)
@@ -886,6 +909,25 @@ class Daemon:
         tc = thread_config(self.cfg, thread_id)
         settings = merge_settings(self.cfg, tc)
         return settings.per_thread_cap
+
+    def _capacity_model(self, thread_id: str, t,
+                        current: str | None) -> str | None:
+        """Model for a capacity retry: never the one that just hit capacity.
+
+        The app's own error says "Please try a different model"; walk
+        general.fallback_models instead of guessing. With no fallback
+        configured the same model is retried after the backoff, which is
+        what the app's Retry button does (capacity is often short-lived).
+        """
+        tried = [m for m in (t.overload_model,) if m]
+        if current and current not in tried:
+            tried.append(current)
+        nxt = pick_fallback_model(self.cfg, tried)
+        if not nxt or nxt == current:
+            return current
+        log.info("%s at capacity on %s; retrying with fallback model %s",
+                 thread_id[:8], current or "?", nxt)
+        return nxt
 
     def _do_resume(self, thread_id: str, decision) -> None:
         try:
@@ -1016,6 +1058,8 @@ class Daemon:
                 log.info("goal %s state is %r (running/paused/done); "
                          "not touching it", thread_id[:8], status)
                 t.last_kind = ""
+                t.overload_streak = 0
+                t.overload_model = None
                 t.next_wake_iso = None
                 save_state(self.state)
                 return True
@@ -1037,7 +1081,13 @@ class Daemon:
             t.success_resumes += 1
             t.last_outcome = "goal_continue"
             t.fail_streak = 0
-            t.last_kind = ""          # handed back to the goal engine
+            if t.last_kind == "server_overloaded":
+                # a capacity re-arm does not prove capacity cleared: keep the
+                # thread planned (with backoff) so a re-park retries again
+                # instead of being re-armed as a fresh quota wait
+                t.overload_model = decision.model or t.overload_model
+            else:
+                t.last_kind = ""      # handed back to the goal engine
             t.next_wake_iso = None
             getattr(self, "_goal_busy_backoff", {}).pop(thread_id, None)
             log.info("goal %s continued via thread/goal/set (status=%s, "
@@ -1116,7 +1166,8 @@ class Daemon:
             t.success_resumes += 1
             t.last_outcome = "uia_continue"
             t.fail_streak = 0
-            t.last_kind = ""
+            if t.last_kind != "server_overloaded":
+                t.last_kind = ""
             t.next_wake_iso = None
             getattr(self, "_goal_busy_backoff", {}).pop(thread_id, None)
             log.info("goal %s resumed via the app's own Continue button (%s)",
@@ -1142,6 +1193,8 @@ class Daemon:
         if outcome.ok:
             t.success_resumes += 1
             t.fail_streak = 0
+            t.overload_streak = 0
+            t.overload_model = None
             t.last_kind = ""            # interruption handled
             t.last_reset_at = None
             t.next_wake_iso = None
@@ -1158,30 +1211,40 @@ class Daemon:
                 self._notify(thread_id, "writer_conflict")
                 save_state(self.state)
                 return
-            t.fail_streak += 1
-            if outcome.kind == "usage_limit":
-                from .timeparse import classify_window
-                reset = None
-                if outcome.reset_at_iso:
-                    try:
-                        reset = datetime.fromisoformat(outcome.reset_at_iso)
-                    except ValueError:
-                        reset = None
-                if reset is None or reset <= _now():
-                    # the attempt just failed on quota: treat the window as
-                    # empty even when the message carried no usable clock
-                    reset = _now() + timedelta(minutes=15)
-                window = ("weekly" if classify_window(reset) == "weekly"
-                          else "primary")
-                self._set_limit(window, reset)
-                t.last_kind = ("usage_weekly" if window == "weekly"
-                               else "usage_primary")
-                t.last_reset_at = reset.isoformat()
-            elif outcome.kind == "overloaded":
+            if outcome.kind == "overloaded":
+                # capacity is external and transient: it must not consume
+                # the failure budget that parks a thread. Remember which
+                # model hit it so the next retry rotates the fallback chain.
                 t.last_kind = "server_overloaded"
-            log.warning("resume %s -> %s%s", thread_id[:8], outcome.kind,
-                        (" (reset %s)" % outcome.reset_at_iso)
-                        if outcome.reset_at_iso else "")
+                t.overload_model = model or t.overload_model
+                t.next_wake_iso = (_now() + timedelta(seconds=float(
+                    self.cfg["general"]["server_overloaded_cooldown_sec"])
+                )).isoformat()
+                log.warning("resume %s -> model at capacity (model=%s); "
+                            "retrying later", thread_id[:8], model or "?")
+            else:
+                t.fail_streak += 1
+                if outcome.kind == "usage_limit":
+                    from .timeparse import classify_window
+                    reset = None
+                    if outcome.reset_at_iso:
+                        try:
+                            reset = datetime.fromisoformat(outcome.reset_at_iso)
+                        except ValueError:
+                            reset = None
+                    if reset is None or reset <= _now():
+                        # the attempt just failed on quota: treat the window as
+                        # empty even when the message carried no usable clock
+                        reset = _now() + timedelta(minutes=15)
+                    window = ("weekly" if classify_window(reset) == "weekly"
+                              else "primary")
+                    self._set_limit(window, reset)
+                    t.last_kind = ("usage_weekly" if window == "weekly"
+                                   else "usage_primary")
+                    t.last_reset_at = reset.isoformat()
+                log.warning("resume %s -> %s%s", thread_id[:8], outcome.kind,
+                            (" (reset %s)" % outcome.reset_at_iso)
+                            if outcome.reset_at_iso else "")
         self._notify(thread_id, outcome.kind,
                      outcome.stderr_tail or outcome.stdout_tail)
         save_state(self.state)
