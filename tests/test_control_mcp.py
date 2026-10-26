@@ -1,7 +1,9 @@
 import json
 import os
+import socket
 import tempfile
 import unittest
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 
@@ -113,6 +115,27 @@ class TestControlApi(unittest.TestCase):
     def test_pause_endpoint(self):
         self._post("/api/pause", {"paused": True})
         self.assertTrue(self._get("/api/status")["paused"])
+
+    def test_post_requires_json_content_type(self):
+        req = urllib.request.Request(
+            self.base + "/api/pause", data=b'{"paused": true}',
+            headers={"Content-Type": "text/plain"}, method="POST")
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(ctx.exception.code, 415)
+        try:
+            body = json.loads(ctx.exception.read().decode())
+        finally:
+            ctx.exception.close()
+        self.assertIn("application/json", body["error"])
+        self.assertFalse(self._get("/api/status")["paused"])
+
+    def test_stop_closes_listening_socket(self):
+        port = self.api.httpd.server_address[1]
+        self.api.stop()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(2)
+            self.assertNotEqual(s.connect_ex(("127.0.0.1", port)), 0)
 
     def test_panel_served(self):
         with urllib.request.urlopen(self.base + "/", timeout=10) as r:

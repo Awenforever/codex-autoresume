@@ -79,6 +79,8 @@ In any Codex conversation:
 
 ## Full documentation / 完整文档
 
-See the repository [README.md](../README.md) (bilingual).
+See the repository [README.md](https://github.com/Awenforever/codex-autoresume)
+(bilingual).
 
-完整文档见仓库 [README.md](../README.md)（中英双语）。
+完整文档见仓库
+[README.md](https://github.com/Awenforever/codex-autoresume)（中英双语）。

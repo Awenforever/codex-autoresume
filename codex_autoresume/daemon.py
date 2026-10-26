@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
@@ -1253,10 +1254,12 @@ class Daemon:
         cmd = self.cfg["general"]["notify_command"]
         if not cmd:
             return
+        # detail carries model/CLI output and lands in a user shell command
+        detail = re.sub(r'[\x00-\x1f\x7f"\'&|<>^%`$\\]', " ", detail[:200])
         sub = (cmd.replace("{event}", "resume_" + kind)
                   .replace("{thread_id}", thread_id)
                   .replace("{reason}", kind)
-                  .replace("{detail}", detail[:200]))
+                  .replace("{detail}", detail))
         try:
             subprocess.run(sub, shell=True, timeout=30,
                            creationflags=0x08000000 if os.name == "nt" else 0)

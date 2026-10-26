@@ -342,7 +342,7 @@ function etaRow(label,q,etaK,rateK,exhK){
  :(exhK&&q[exhK]&&q.secondary_used>=100?
    ('<b class="eta">'+L("exhausted")+" · "+fmtMDHM(q[exhK])+"</b>")
  :"<b>--</b>"));
- var tail=(rate?(' <span style="font-size:11px">（'+rate+"%/h）</span>"):"");
+ var tail=(rate?(' <span style="font-size:11px">('+rate+"%/h)</span>"):"");
 
  return '<div class="kv"><span>'+label+"</span><span>"+b+tail+"</span></div>"}
 function kvRow(k,v){return '<div class="kv"><span>'+k+"</span><span>"+v+"</span></div>"}
@@ -356,7 +356,9 @@ function modelOpts(cur){var o="";var ms=(window.__s&&window.__s.models)||[];
 for(var k=0;k<ms.length;k++){o+='<option '+((cur||"")===ms[k].id?"selected":"")+' value="'+esc(ms[k].id)+'">'+esc(ms[k].name)+"</option>"}
 return o}
 function esc(s){return String(s===null||s===undefined?"":s).replace(/&/g,"&amp;")
-.replace(/</g,"&lt;").replace(/"/g,"&quot;")}
+.replace(/</g,"&lt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
+function jsq(s){return esc(String(s===null||s===undefined?"":s)
+.replace(/\\/g,"\\\\").replace(/'/g,"\\'"))}
 function hlNews(t){
  // single pass over the escaped text: no nested spans, broad lexicon
  var RE=new RegExp(
@@ -387,8 +389,8 @@ function newsBox(s){
  for(var i=0;i<es.length;i++){
  var e=es[i];
  rows+='<div class="nl">'+(e.at?'<span class="d" title="'+L("postAt")+'">'+
- fmtPostAt(e.at)+"</span>":"")+
- hlNews(e.text)+"</div>"}
+ esc(fmtPostAt(e.at))+"</span>":"")+
+ hlNews(esc(e.text))+"</div>"}
  return '<div class="kv"><span>'+L("news")+'</span><span style="font-size:11px">'+
  L("newsWin")+"</span></div>"+'<div class="newsbox" id="newsbox">'+rows+"</div>"}
 function fmtPostAt(iso){
@@ -476,26 +478,26 @@ var cInfo=(cc0?("×"+cc0):L("noneC"));
 if(cc0&&cq0.credits_nearest_expiry){cInfo+=L("expirePfx")+fmtMDHM(cq0.credits_nearest_expiry)+")"}
 var cardSwitch='<div class="ctl tipn end" data-tip="'+esc(L("tipCard"))+'">'+
 '<label class="sw"><input type="checkbox"'+(t.reset_card?" checked":"")+
-' onchange="setT(\''+t.id+'\',{reset_card:this.checked})"><i></i></label>'+
+' onchange="setT(\''+jsq(t.id)+'\',{reset_card:this.checked})"><i></i></label>'+
 '<label>'+L("card")+'</label><span style="font-size:11px;color:var(--dim)">'+cInfo+"</span></div>";
 var promptRow="";
 if(!t.is_goal){
 promptRow='<div class="prow"><label style="font-size:12px;color:var(--dim)">'+L("prompt")+"</label>"+
-'<input type="text" id="pp_'+t.id.slice(0,8)+'" value="'+esc(t.prompt)+
-'" placeholder="'+esc(defp)+'" onchange="setT(\''+t.id+'\',{prompt:this.value})">'+
-'<button class="btn-mini" onclick="resetPrompt(\''+t.id+'\')">'+L("resetD")+"</button></div>";
+'<input type="text" id="pp_'+esc(t.id.slice(0,8))+'" value="'+esc(t.prompt)+
+'" placeholder="'+esc(defp)+'" onchange="setT(\''+jsq(t.id)+'\',{prompt:this.value})">'+
+'<button class="btn-mini" onclick="resetPrompt(\''+jsq(t.id)+'\')">'+L("resetD")+"</button></div>";
 }
 var rTip=t.is_goal?L("tipModelGoal"):L("tipModel");
 var rsel='<div class="ctl tipn end" data-tip="'+esc(rTip)+
 '"><label>Reasoning</label><select'+(t.is_goal?" disabled":"")+
-' onchange="setT(\''+t.id+'\',{effort:this.value})">';
+' onchange="setT(\''+jsq(t.id)+'\',{effort:this.value})">';
 for(var j=0;j<eff.length;j++){rsel+='<option '+((eff[j]===(t.effort||""))?"selected":"")+
 ' value="'+eff[j]+'">'+(eff[j]||L("inherit"))+"</option>"}
 rsel+="</select></div>";
 var mTip=t.is_goal?L("tipModelGoal"):L("tipModel");
 var modelCtl='<div class="ctl tipn end" data-tip="'+esc(mTip)+
 '"><label>'+L("model")+'</label><select'+(t.is_goal?" disabled":"")+
-' onchange="setT(\''+t.id+'\',{model:this.value})"><option '+((t.model||"")===""?"selected":"")+' value="">'+
+' onchange="setT(\''+jsq(t.id)+'\',{model:this.value})"><option '+((t.model||"")===""?"selected":"")+' value="">'+
 L("inherit")+"</option>"+modelOpts(t.model)+"</select></div>";
 rows+=(i===0?dl:"")+
 '<div class="tcard '+(t.guard?"guard":"")+'">'+
@@ -508,11 +510,11 @@ esc((t.title||"")||String(t.id||"").slice(0,13))+"</span>"+badges+"</div>"+
 '<div class="controls">'+
 '<div class="ctl tip start" data-tip="'+esc(L("tipGuard"))+'">'+
 '<label class="sw"><input type="checkbox"'+(t.guard?" checked":"")+
-' onchange="setT(\''+t.id+'\',{guard:this.checked})"><i></i></label>'+
+' onchange="setT(\''+jsq(t.id)+'\',{guard:this.checked})"><i></i></label>'+
 '<label>'+L("guard")+"</label></div>"+
 '<div class="ctl tip" data-tip="'+esc(L("tipWeekly"))+'">'+
 '<label class="sw"><input type="checkbox"'+(t.weekly?" checked":"")+
-' onchange="setT(\''+t.id+'\',{weekly:this.checked})"><i></i></label>'+
+' onchange="setT(\''+jsq(t.id)+'\',{weekly:this.checked})"><i></i></label>'+
 '<label>'+L("weekly")+"</label></div>"+
 cardSwitch+"</div>"+
 '<div class="controls2">'+modelCtl+rsel+"</div>"+promptRow+"</div>";
@@ -658,6 +660,13 @@ class ControlApi:
                     self._json({"error": "not found"}, 404)
 
             def do_POST(self):
+                # JSON-only: cross-site form posts cannot set this type
+                # without a CORS preflight, which this server never grants
+                ctype = (self.headers.get("Content-Type") or "")
+                if ctype.split(";")[0].strip().lower() != "application/json":
+                    self._json({"error": "Content-Type must be "
+                                         "application/json"}, 415)
+                    return
                 length = int(self.headers.get("Content-Length") or 0)
                 payload = {}
                 if length:
@@ -684,6 +693,7 @@ class ControlApi:
     def stop(self) -> None:
         if self.httpd is not None:
             self.httpd.shutdown()
+            self.httpd.server_close()
             self.httpd = None
 
     # ------------------------------------------------------------- handlers

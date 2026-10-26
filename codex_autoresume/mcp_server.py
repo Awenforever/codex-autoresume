@@ -160,6 +160,15 @@ def tool_call(name: str, args: dict, base: str = CONTROL_URL) -> dict:
             return _control("/api/pause",
                             {"paused": bool(args.get("paused"))}, base=base)
         return {"error": "unknown tool %s / 未知工具 %s" % (name, name)}
+    except urllib.error.HTTPError as e:
+        try:
+            body = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            body = None
+        if isinstance(body, dict) and body.get("error"):
+            return body
+        return {"error": "control API returned HTTP %s / 控制接口返回 HTTP %s"
+                         % (e.code, e.code)}
     except urllib.error.URLError as e:
         return {"error": "daemon control API unreachable at %s (%s). "
                          "Start it with: schtasks /Run /TN codex-autoresume "
@@ -167,7 +176,7 @@ def tool_call(name: str, args: dict, base: str = CONTROL_URL) -> dict:
                          "请运行 schtasks /Run /TN codex-autoresume 或 "
                          "`codex-autoresume daemon`" % (base, e, base, e)}
     except Exception as e:  # defensive: never crash the stdio loop
-        return {"error": "%s: %s" % (type(e).__name__, e)}
+        return {"error": "error / 错误: %s: %s" % (type(e).__name__, e)}
 
 
 def serve(stdin=sys.stdin.buffer, stdout=sys.stdout.buffer) -> None:
@@ -203,7 +212,8 @@ def serve(stdin=sys.stdin.buffer, stdout=sys.stdout.buffer) -> None:
         else:
             _send(stdout, {"jsonrpc": "2.0", "id": rid,
                            "error": {"code": -32601,
-                                     "message": "method not found"}})
+                                     "message": "method not found / "
+                                                "方法不存在"}})
             continue
         _send(stdout, {"jsonrpc": "2.0", "id": rid, "result": result})
 

@@ -1,6 +1,6 @@
 {
   "name": "codex-autoresume-guard",
-  "version": "0.3.45",
+  "version": "0.3.46",
   "description": "Control panel: http://127.0.0.1:8765 — auto-continue Codex conversations and goals after quota resets. / 控制面板：http://127.0.0.1:8765 —— 额度重置后自动继续 Codex 对话与 goal。",
   "author": {
     "name": "codex-autoresume contributors",
@@ -33,7 +33,6 @@
     "brandColor": "#10A37F",
     "composerIcon": "./assets/composerIcon.svg",
     "logo": "./assets/logo.svg",
-    "screenshots": [],
     "websiteURL": "https://github.com/Awenforever/codex-autoresume"
   }
 }

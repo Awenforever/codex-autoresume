@@ -71,3 +71,11 @@ class VersionAlignmentTest(unittest.TestCase):
         for rel in ("plugin/plugin.json", "plugin/.codex-plugin/plugin.json"):
             with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
                 self.assertEqual(json.load(f)["version"], __version__, rel)
+
+
+class ManifestConsistencyTest(unittest.TestCase):
+    def test_plugin_manifests_are_identical(self):
+        self.assertEqual(
+            _read("plugin", "plugin.json"),
+            _read("plugin", ".codex-plugin", "plugin.json"),
+            "plugin/plugin.json and plugin/.codex-plugin/plugin.json drifted")

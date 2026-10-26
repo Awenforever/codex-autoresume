@@ -190,6 +190,56 @@ class PanelHeaderTest(unittest.TestCase):
                       PANEL_HTML)
 
 
+class PanelEscapingTest(unittest.TestCase):
+    """Dynamic text reaches innerHTML only through esc()/jsq()."""
+
+    def test_news_text_and_thread_ids_go_through_escapers(self):
+        from codex_autoresume.control import PANEL_HTML
+        self.assertIn("hlNews(esc(e.text))", PANEL_HTML)
+        self.assertNotIn("hlNews(e.text)", PANEL_HTML)
+        self.assertIn('title="\'+L("postAt")+\'">\'+\n esc(fmtPostAt(e.at))',
+                      PANEL_HTML)
+        self.assertIn("setT(\\''+jsq(t.id)", PANEL_HTML)
+        self.assertNotIn("setT(\\''+t.id", PANEL_HTML)
+
+    def test_esc_and_jsq_neutralise_markup(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not installed")
+        from codex_autoresume.control import PANEL_HTML
+        js = re.search(r"<script>(.*)</script>", PANEL_HTML, re.S).group(1)
+        m = re.search(r"(function esc\(s\)\{.*?)(?=function newsBox)", js,
+                      re.S)
+        self.assertTrue(m, "esc/hlNews not found in panel script")
+        harness = m.group(1) + r"""
+const out = {
+  esc: esc("<img src=x onerror='alert(1)'>&\""),
+  news: hlNews(esc("<img src=x onerror=alert(1)> reset at 15:00")),
+  jsq: jsq("a'b\\c<d\"e&f")
+};
+console.log(JSON.stringify(out));
+"""
+        fd, path = tempfile.mkstemp(suffix=".js")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(harness)
+            r = subprocess.run([node, path], capture_output=True, text=True,
+                               timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr[:2000])
+            got = json.loads(r.stdout.strip().splitlines()[-1])
+        finally:
+            os.unlink(path)
+        self.assertIn("&lt;img", got["esc"])
+        self.assertIn("&#39;", got["esc"])
+        self.assertIn("&quot;", got["esc"])
+        self.assertIn("&amp;", got["esc"])
+        self.assertNotIn("<img", got["esc"])
+        self.assertNotIn("<img", got["news"])
+        self.assertIn("&lt;img", got["news"])
+        self.assertIn("hl-reset", got["news"])
+        self.assertEqual(got["jsq"], "a\\&#39;b\\\\c&lt;d&quot;e&amp;f")
+
+
 class PanelI18nCoverageTest(unittest.TestCase):
     """Every L("key") used in the panel must exist in BOTH language dicts."""
 

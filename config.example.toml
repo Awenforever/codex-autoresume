@@ -44,7 +44,9 @@ auto_track_max_age_hours = 36
 
 # Optional shell command fired on resume outcomes.
 # Placeholders: {event} {thread_id} {reason} {detail}
-# notify_command = 'powershell -Command "New-BurntToastNotification -Text \"{event} {thread_id}\"'
+# {detail} is resume output; shell metacharacters are stripped before
+# substitution, but keep it quoted in your command as well.
+# notify_command = 'C:/tools/notify.exe "{event} {thread_id}" "{detail}"'
 
 resume_timeout_sec = 21600      # a resumed turn may legitimately run hours
 max_concurrent_resumes = 2
