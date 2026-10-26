@@ -35,9 +35,15 @@ class PanelJsSyntaxTest(unittest.TestCase):
 
 
 class PanelNewsHighlightTest(unittest.TestCase):
-    """The news lexicon must give the word "reset" its own accent class."""
+    """The news lexicon must give "reset" per-letter color spans."""
 
-    def test_reset_keyword_gets_its_own_class(self):
+    @staticmethod
+    def _rainbow(word: str) -> str:
+        return ('<span class="hl-reset">'
+                + "".join('<span class="rl">%s</span>' % ch for ch in word)
+                + "</span>")
+
+    def test_reset_keyword_gets_per_letter_spans(self):
         node = shutil.which("node")
         if not node:
             self.skipTest("node not installed")
@@ -49,7 +55,8 @@ class PanelNewsHighlightTest(unittest.TestCase):
 const out = [
   hlNews("Day 20/ Rest and reset"),
   hlNews("Landed as announced reset at 15:00"),
-  hlNews("Preset values keep their tone")
+  hlNews("Preset values keep their tone"),
+  hlNews("Two resets happened")
 ];
 console.log(JSON.stringify(out));
 """
@@ -60,13 +67,15 @@ console.log(JSON.stringify(out));
             r = subprocess.run([node, path], capture_output=True, text=True,
                                timeout=30)
             self.assertEqual(r.returncode, 0, r.stderr[:2000])
-            plain, landed, preset = json.loads(r.stdout.strip().splitlines()[-1])
+            plain, landed, preset, plural = json.loads(
+                r.stdout.strip().splitlines()[-1])
         finally:
             os.unlink(path)
-        self.assertIn('<span class="hl-reset">reset</span>', plain)
+        self.assertIn(self._rainbow("reset"), plain)
         self.assertIn('class="hl-ok"', landed)
-        self.assertIn('<span class="hl-reset">reset</span>', landed)
+        self.assertIn(self._rainbow("reset"), landed)
         self.assertNotIn("hl-reset", preset)
+        self.assertIn(self._rainbow("resets"), plural)
 
 
 if __name__ == "__main__":
