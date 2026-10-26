@@ -83,6 +83,50 @@ console.log(JSON.stringify(out));
         self.assertRegex(PANEL_HTML, r"\.hl-reset\{font-weight:700\}")
 
 
+class PanelThemeTest(unittest.TestCase):
+    """Three-state theme: auto follows the live media query, not a boot read."""
+
+    def test_segmented_control_has_three_modes(self):
+        from codex_autoresume.control import PANEL_HTML
+        for mode in ("auto", "light", "dark"):
+            self.assertIn('data-theme="%s"' % mode, PANEL_HTML)
+        self.assertIn('var THEME="auto"', PANEL_HTML)
+        self.assertNotIn("toggleTheme", PANEL_HTML)
+        self.assertIn('addEventListener("change",_themeFollow)', PANEL_HTML)
+
+    def test_auto_resolver_tracks_media_query(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not installed")
+        from codex_autoresume.control import PANEL_HTML
+        js = re.search(r"<script>(.*)</script>", PANEL_HTML, re.S).group(1)
+        m = re.search(r"function themeIsLight\(\)\{[^\n]*\}", js)
+        self.assertTrue(m, "themeIsLight not found in panel script")
+        harness = m.group(0) + r"""
+const cases = [
+  ["auto", true], ["auto", false],
+  ["dark", true], ["dark", false],
+  ["light", true], ["light", false]
+];
+const out = cases.map(([mode, mq]) => {
+  THEME = mode; MQL = {matches: mq};
+  return themeIsLight();
+});
+console.log(JSON.stringify(out));
+"""
+        fd, path = tempfile.mkstemp(suffix=".js")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write("var THEME, MQL;\n" + harness)
+            r = subprocess.run([node, path], capture_output=True, text=True,
+                               timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr[:2000])
+            got = json.loads(r.stdout.strip().splitlines()[-1])
+        finally:
+            os.unlink(path)
+        self.assertEqual(got, [True, False, False, False, True, True])
+
+
 if __name__ == "__main__":
     unittest.main()
 
