@@ -159,6 +159,36 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class PanelHeaderTest(unittest.TestCase):
+    """Header chrome: icon-only refresh/lang, English default, no status chips."""
+
+    def test_refresh_and_lang_are_icon_buttons(self):
+        from codex_autoresume.control import PANEL_HTML
+        self.assertRegex(
+            PANEL_HTML,
+            r'<button class="btn-mini icon" id="langBtn"[^>]*>\s*<svg')
+        self.assertRegex(
+            PANEL_HTML,
+            r'<button class="btn-mini icon" id="refreshBtn"[^>]*>\s*<svg')
+        self.assertNotIn('data-i18n="refresh"', PANEL_HTML)
+
+    def test_english_is_default_language(self):
+        from codex_autoresume.control import PANEL_HTML
+        self.assertIn('<html lang="en">', PANEL_HTML)
+        self.assertIn('<title>Codex Guard Console</title>', PANEL_HTML)
+        self.assertIn('<h1 data-i18n="title">Codex Guard</h1>', PANEL_HTML)
+        self.assertIn('var LNG="en"', PANEL_HTML)
+        self.assertIn('localStorage.getItem("cglang")||"en"', PANEL_HTML)
+
+    def test_status_chips_reduced_to_dry_run(self):
+        from codex_autoresume.control import PANEL_HTML
+        self.assertNotIn('L("running")', PANEL_HTML)
+        self.assertNotIn('L("pausedC")', PANEL_HTML)
+        self.assertNotIn('"LIVE"', PANEL_HTML)
+        self.assertIn('s.dry_run?\'<span class="chip dry">DRY-RUN</span>\':""',
+                      PANEL_HTML)
+
+
 class PanelI18nCoverageTest(unittest.TestCase):
     """Every L("key") used in the panel must exist in BOTH language dicts."""
 

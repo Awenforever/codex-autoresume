@@ -22,9 +22,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .state import load_state, save_state
 
 PANEL_HTML = r"""<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8">
+<html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Codex 守护控制台</title>
+<title>Codex Guard Console</title>
 <style>
 :root{--bg:#0a0c0d;--card:#131719;--card2:#181d20;--line:#242b30;--fg:#ecefef;
 --dim:#87929a;--accent:#10a37f;--accent-soft:#12362c;--warn:#e0a341;--danger:#e5534b;
@@ -59,7 +59,6 @@ h1{font-size:17px;font-weight:650;letter-spacing:.2px}
 .hright{margin-left:auto;display:flex;gap:8px;align-items:center}
 .chip{font-size:12px;border-radius:999px;padding:4px 12px;font-weight:600;
 border:1px solid var(--line);color:var(--dim);background:var(--card)}
-.chip.on{border-color:rgba(var(--accent-rgb),.5);color:var(--accent);background:var(--accent-soft)}
 .chip.dry{border-color:rgba(var(--warn-rgb),.5);color:var(--warn)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;
 padding:16px 18px;margin-bottom:13px}
@@ -121,9 +120,9 @@ transition:border-color .15s,transform .1s}
 button:hover{border-color:var(--accent)} button:active{transform:scale(.97)}
 .btn-main{background:var(--accent-soft);border-color:rgba(var(--accent-rgb),.4);color:var(--accent)}
 .btn-mini{padding:5px 10px;font-size:12px;border-radius:8px}
-.btn-mini.theme{width:32px;min-width:32px;padding:0;height:26px;display:inline-flex;
-align-items:center;justify-content:center;color:var(--dim)}
-.btn-mini.theme:hover{color:var(--fg);border-color:var(--hovbd)}
+.btn-mini.theme,.btn-mini.icon{width:32px;min-width:32px;padding:0;height:26px;
+display:inline-flex;align-items:center;justify-content:center;color:var(--dim)}
+.btn-mini.theme:hover,.btn-mini.icon:hover{color:var(--fg);border-color:var(--hovbd)}
 .btn-mini.theme svg{display:none}
 .btn-mini.theme[data-mode="auto"] .ic-auto,
 .btn-mini.theme[data-mode="light"] .ic-sun,
@@ -206,11 +205,11 @@ pointer-events:none;box-shadow:0 6px 24px var(--shadow)}
  <div class="logo"><svg viewBox="0 0 64 64"><path d="M32 4 54 12v18c0 15-9.5 25.5-22 30C19.5 55.5 10 45 10 30V12Z"
  fill="none" stroke="#fff" stroke-width="5"/><path d="M21 32.5 29 40.5 43 25" fill="none"
  stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
- <div><h1 data-i18n="title">Codex 守护</h1><div class="sub" data-i18n="sub">额度重置后自动继续任务 · 仅本机</div></div>
+ <div><h1 data-i18n="title">Codex Guard</h1><div class="sub" data-i18n="sub">Auto-continue conversations after quota resets</div></div>
  <div class="hright" id="chips"></div>
  <button class="btn-mini theme" id="themeBtn" data-mode="auto" onclick="cycleTheme()"><svg class="ic-auto" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.2"/><path d="M12 3.8a8.2 8.2 0 0 1 0 16.4Z" fill="currentColor" stroke="none"/></svg><svg class="ic-sun" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.1"/><path d="M12 2.9v2.2M12 18.9v2.2M2.9 12h2.2M18.9 12h2.2M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/></svg><svg class="ic-moon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20.4 14.2A8.6 8.6 0 0 1 9.8 3.6 8.6 8.6 0 1 0 20.4 14.2Z"/></svg></button>
- <button class="btn-mini" style="flex:none;min-width:44px" id="langBtn" onclick="toggleLang()">CN</button>
- <button class="btn-mini" style="flex:none" data-i18n="refresh" onclick="refresh();toast(L('refreshed'))">刷新</button>
+ <button class="btn-mini icon" id="langBtn" onclick="toggleLang()" aria-label="Language"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.4"/><path d="M3.6 12h16.8M12 3.6c2.5 2.3 3.8 5.1 3.8 8.4s-1.3 6.1-3.8 8.4c-2.5-2.3-3.8-5.1-3.8-8.4s1.3-6.1 3.8-8.4Z"/></svg></button>
+ <button class="btn-mini icon" id="refreshBtn" onclick="refresh();toast(L('refreshed'))" aria-label="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.49-6.01"/><path d="M20.5 3.5v5h-5"/></svg></button>
 </header>
 <div class="card"><div class="hero">
  <div class="ringcol">
@@ -237,28 +236,28 @@ pointer-events:none;box-shadow:0 6px 24px var(--shadow)}
    </div>
   </div>
   <div class="ringrow" id="ringrow">
-   <div style="color:var(--dim);font-size:13px">加载中…</div>
+   <div style="color:var(--dim);font-size:13px">Loading…</div>
   </div>
   <div id="pausewrap"></div>
  </div>
  <div class="hinfo" id="hinfo">
-  <div style="color:var(--dim);font-size:13px" data-i18n="loading">加载中…</div>
+  <div style="color:var(--dim);font-size:13px" data-i18n="loading">Loading…</div>
  </div>
 </div></div>
-<div class="sect" data-i18n="recent">近期会话</div>
+<div class="sect" data-i18n="recent">Recent conversations</div>
 <div id="threads"></div>
 <div class="foot" id="foot"></div>
 <div id="toast"></div>
 <script>
 var eff=["","none","minimal","low","medium","high","xhigh"];
-var LNG="zh";try{LNG=localStorage.getItem("cglang")||"zh"}catch(e){}
+var LNG="en";try{LNG=localStorage.getItem("cglang")||"en"}catch(e){}if(LNG!=="zh"&&LNG!=="en")LNG="en";
 var I18N={
-zh:{title:"Codex 守护",sub:"额度重置后自动继续任务 · 仅本机",refresh:"刷新",loading:"加载中…",theme:"主题",themeAuto:"自动跟随系统",themeLight:"浅色",themeDark:"深色",
+zh:{title:"Codex 守护",sub:"额度重置后自动继续任务 · 仅本机",refresh:"刷新",langTip:"语言：中文（点击切换）",loading:"加载中…",theme:"主题",themeAuto:"自动跟随系统",themeLight:"浅色",themeDark:"深色",
 w5:"5 小时窗口",wk:"周窗口",reset:"重置",status:"使用状态",limited:"额度受限",
 avail:"✓ 可正常使用",unknown:"状态未知",eta5:"5h 额度预估耗尽",etaw:"周额度预估耗尽",
 credits:"重置赠送",forecast:"预告",landed:"到账",
-news:"动态",pauseAll:"⏸ 全部暂停",resumeAll:"▶ 全部继续",running:"守护运行中",
-pausedC:"已暂停",recent:"近期会话",
+news:"动态",pauseAll:"⏸ 全部暂停",resumeAll:"▶ 全部继续",
+recent:"近期会话",
 noThread:"暂无近期会话——在 Codex 里打开一个对话后刷新即可",
 guard:"守护",weekly:"跨周",card:"重置卡",noneC:"（无）",expirePfx:"（到期 ",
 model:"模型",inherit:"继承",prompt:"继续指令",resetD:"恢复默认",
@@ -279,12 +278,12 @@ upd:"已更新",restored:"已恢复默认指令",pauseOK:"守护已暂停",resum
 refreshed:"已刷新",
 footer:"打开方式：侧栏输入 <code>http://127.0.0.1:8765</code>（推荐，不消耗额度）· 桌面快捷方式 · 完整说明见插件 README"},
 en:{title:"Codex Guard",sub:"Auto-continue conversations after quota resets",
-refresh:"Refresh",loading:"Loading…",theme:"Theme",themeAuto:"Follow system",themeLight:"Light",themeDark:"Dark",w5:"5h window",wk:"Weekly",reset:"Resets",
+refresh:"Refresh",langTip:"Language: English (click to switch)",loading:"Loading…",theme:"Theme",themeAuto:"Follow system",themeLight:"Light",themeDark:"Dark",w5:"5h window",wk:"Weekly",reset:"Resets",
 status:"Usage",limited:"Limited",avail:"✓ Available",unknown:"Unknown",
 eta5:"5h quota ETA",etaw:"Weekly quota ETA",
 credits:"Reset credits",forecast:"Forecast",landed:"Landed",
 news:"News",pauseAll:"⏸ Pause all",resumeAll:"▶ Resume all",
-running:"Watching",pausedC:"Paused",recent:"Recent conversations",
+recent:"Recent conversations",
 noThread:"No recent conversations — open one in Codex, then refresh",
 guard:"Auto-resume",weekly:"Weekly",card:"Credits",noneC:"(none)",
 expirePfx:" (expires ",model:"Model",inherit:"Inherit",prompt:"Resume prompt",
@@ -452,8 +451,7 @@ kvRow(L("credits"),'<b>'+fmt((q.credits_count!==undefined)?q.credits_count:q.cre
 annRows;
 }
 document.getElementById("chips").innerHTML=
-'<span class="chip '+(s.paused?"":"on")+'">'+(s.paused?L("pausedC"):L("running"))+"</span>"+
-'<span class="chip '+(s.dry_run?"dry":"on")+'">'+(s.dry_run?"DRY-RUN":"LIVE")+"</span>";
+s.dry_run?'<span class="chip dry">DRY-RUN</span>':"";
 var dl="";
 if(s.models&&s.models.length){
 dl='<datalist id="models">';
@@ -538,7 +536,10 @@ function(){toast(s.paused?L("resumeOK"):L("pauseOK"));refresh()})}
 function applyLang(){
 var els=document.querySelectorAll("[data-i18n]");
 for(var i=0;i<els.length;i++){els[i].textContent=L(els[i].getAttribute("data-i18n"))}
-var lb=document.getElementById("langBtn");if(lb){lb.textContent=(LNG==="en")?"EN":"CN"}
+var lb=document.getElementById("langBtn");
+if(lb){var lt=L("langTip");lb.title=lt;lb.setAttribute("aria-label",lt)}
+var rb=document.getElementById("refreshBtn");
+if(rb){var rt=L("refresh");rb.title=rt;rb.setAttribute("aria-label",rt)}
 var tb=document.getElementById("themeBtn");if(tb){syncThemeUi()}
 var ft=document.getElementById("foot");if(ft){ft.innerHTML=L("footer")}
 var ld=document.getElementById("ld");if(ld){ld.textContent=L("loading")}
