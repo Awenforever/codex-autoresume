@@ -212,6 +212,7 @@ class Daemon:
             for e in events)
         raw = self._quota_snapshot(
             force=new_limit_evidence or self._need_snapshot())
+        self._reconcile_limit(raw)
         self._note_limit_evidence(events, raw)
         snapshot = self._effective_snapshot(raw)
         self._maybe_consume_reset_card(snapshot)
@@ -603,6 +604,59 @@ class Daemon:
                 window = ("weekly" if classify_window(reset) == "weekly"
                           else "primary")
                 self._set_limit(window, reset)
+
+    def _reconcile_limit(self, raw: QuotaSnapshot | None) -> None:
+        """Drop a restored block once a fresh snapshot proves its window ended.
+
+        Only a strictly NEWER window (resets_at advanced beyond the block +
+        grace) with LOW usage proves the interruption's window is over: a
+        trailing snapshot still describes the old window (resets_at
+        unchanged, often 99% used) and must keep the block. 100% on the new
+        window means it is already empty again, so the block moves to its
+        reset; 50-99% is ambiguous and stays conservative until the block
+        expires on its own.
+        """
+        lim = self._active_limit()
+        if lim is None or raw is None:
+            return
+        window, until = lim
+        w = raw.secondary if window == "weekly" else raw.primary
+        if not w.resets_at:
+            return
+        reset = datetime.fromtimestamp(w.resets_at).astimezone()
+        if reset <= until + LIMIT_GRACE:
+            return
+        used = w.used_percent or 0
+        if used >= 100:
+            self._set_limit(window, reset)
+            return
+        if used >= 50:
+            return
+        self._clear_limit(window)
+        self._drop_stale_reset_markers(until)
+
+    def _drop_stale_reset_markers(self, until: datetime) -> None:
+        """Forget per-thread reset times belonging to the window just proven over.
+
+        Keeps last_kind so the thread stays planned; only the stale boundary
+        goes, which is what _restore_limit_evidence would otherwise re-assert
+        on the next tick.
+        """
+        changed = False
+        for t in self.state.threads.values():
+            if not t.last_reset_at:
+                continue
+            try:
+                reset = datetime.fromisoformat(t.last_reset_at)
+            except ValueError:
+                t.last_reset_at = None
+                changed = True
+                continue
+            if reset <= until + LIMIT_GRACE:
+                t.last_reset_at = None
+                changed = True
+        if changed:
+            save_state(self.state)
 
     def _note_limit_evidence(self, events, raw: QuotaSnapshot | None) -> None:
         """Turn interruption evidence into a persisted window limit."""

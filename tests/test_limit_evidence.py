@@ -133,6 +133,46 @@ class TestLimitEvidence(unittest.TestCase):
         self.assertEqual(datetime.fromisoformat(t.next_wake_iso),
                          reset + LIMIT_GRACE)
 
+    def test_reconcile_keeps_block_on_trailing_snapshot(self):
+        # the cached snapshot still describes the SAME exhausted window
+        reset = self.now + timedelta(minutes=15)
+        self.d._set_limit("primary", reset)
+        self.d._reconcile_limit(self.snap(p=99, p_reset=reset))
+        until = self.d._active_limit()[1]
+        self.assertEqual(until, reset + LIMIT_GRACE)
+
+    def test_reconcile_clears_block_on_new_low_window(self):
+        # the window actually rolled early (seen on desktop-cn7p93m): the
+        # restored 15:38 block must not hold back a fresh 0% window
+        old_reset = self.now + timedelta(minutes=80)
+        t = self.d.state.thread("t1")
+        t.tracked = True
+        t.last_kind = "usage_primary"
+        t.last_reset_at = old_reset.isoformat()
+        self.d._set_limit("primary", old_reset)
+        self.d._reconcile_limit(
+            self.snap(p=0, p_reset=self.now + timedelta(hours=5)))
+        self.assertIsNone(self.d._active_limit())
+        self.assertIsNone(t.last_reset_at)
+        self.assertEqual(t.last_kind, "usage_primary")
+        # next tick must not resurrect it from thread state
+        self.d._restore_limit_evidence()
+        self.assertIsNone(self.d._active_limit())
+
+    def test_reconcile_moves_block_when_new_window_already_empty(self):
+        old_reset = self.now + timedelta(minutes=30)
+        self.d._set_limit("primary", old_reset)
+        new_reset = (self.now + timedelta(hours=4)).replace(microsecond=0)
+        self.d._reconcile_limit(self.snap(p=100, p_reset=new_reset))
+        self.assertEqual(self.d._active_limit()[1], new_reset + LIMIT_GRACE)
+
+    def test_reconcile_keeps_block_on_ambiguous_new_window(self):
+        old_reset = self.now + timedelta(minutes=30)
+        self.d._set_limit("primary", old_reset)
+        self.d._reconcile_limit(
+            self.snap(p=70, p_reset=self.now + timedelta(hours=4)))
+        self.assertEqual(self.d._active_limit()[1], old_reset + LIMIT_GRACE)
+
     def test_effective_snapshot_feeds_planner_goal_guard(self):
         # goal row with no reset time of its own: the effective snapshot is
         # what prevents the immediate Continue on a trailing 99%
