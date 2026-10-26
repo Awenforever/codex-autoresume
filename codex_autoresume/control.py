@@ -113,6 +113,7 @@ text-overflow:ellipsis;flex:1;min-width:0}
 .badge{font-size:10px;border-radius:6px;padding:1.5px 7px;font-weight:600;flex:none}
 .badge.goal{background:var(--accent-soft);color:var(--accent)}
 .badge.gstat{background:#3a3320;color:var(--warn)}
+.badge.run{background:var(--accent-soft);color:var(--accent)}
 .meta{font-size:11.5px;color:var(--dim);margin:5px 0 11px 17px}
 .meta em{font-style:normal;color:#a8b3ba}
 .controls{display:flex;gap:11px;align-items:center;flex-wrap:wrap;
@@ -234,7 +235,7 @@ tipGuard:"打开则表示 5h 额度耗尽后自动继续任务",
 tipWeekly:"打开则表示守护开启时周额度重置后也自动继续任务",
 tipCard:"周额度耗尽且账户有官方重置卡时，自动消耗一张以继续任务",
 quotaNA:"额度快照暂不可用（网络波动），守护仍按重置时间正常工作",
-postAt:"动态发布时间",exhausted:"已耗尽",newsWin:"近 48 小时",clkLocal:"本机",clkPT:"PT",
+postAt:"动态发布时间",exhausted:"已耗尽",newsWin:"近 48 小时",clkLocal:"本机",clkPT:"PT",stRunning:"运行中",stWaiting:"等待额度",
 tipModel:"每次自动恢复时使用的模型/推理强度；选「继承」则沿用对话自身设置",
 tipModelGoal:"/goal 会话由桌面应用驱动，固定沿用对话自身设置，因此锁定为继承",g_usage_limited:"额度受限",g_budget_limited:"预算受限",g_active:"运行中",
 g_paused:"已暂停",g_blocked:"受阻",g_complete:"已完成",
@@ -260,7 +261,7 @@ tipGuard:"On: automatically continue this thread when the 5h quota resets",
 tipWeekly:"On: also continue after the weekly quota resets (Auto-resume on)",
 tipCard:"When the weekly quota runs out, spend a reset credit to keep going",
 quotaNA:"Quota snapshot unavailable — resets are still tracked",
-postAt:"post publication time",exhausted:"Exhausted",newsWin:"last 48h",clkLocal:"Local",clkPT:"PT",
+postAt:"post publication time",exhausted:"Exhausted",newsWin:"last 48h",clkLocal:"Local",clkPT:"PT",stRunning:"Running",stWaiting:"Waiting for quota",
 tipModel:"Model/reasoning used for every automatic resume; Inherit keeps the conversation's own settings",
 tipModelGoal:"/goal threads are driven by the desktop app and always use their own settings, so they stay locked",g_usage_limited:"quota-limited",g_budget_limited:"budget-limited",g_active:"active",
 g_paused:"paused",g_blocked:"blocked",g_complete:"complete",
@@ -427,7 +428,9 @@ var ts=s.threads||[];
 for(var i=0;i<ts.length;i++){
 var t=ts[i];
 var badges=(t.is_goal?'<span class="badge goal">GOAL</span>':"")+
-(t.goal_status?'<span class="badge gstat">'+esc(gstat(t.goal_status))+"</span>":"");
+(t.goal_status?'<span class="badge gstat">'+esc(gstat(t.goal_status))+"</span>":"")+
+(!t.is_goal&&t.run?'<span class="badge '+(t.run==="running"?"run":"gstat")+'">'+
+esc(t.run==="running"?L("stRunning"):L("stWaiting"))+"</span>":"");
 var tries=(t.attempts&&t.attempts>t.resumes)?(L("tryPfx")+t.attempts+L("trySfx")):"";
 var oc=t.last_outcome;
 var ocMap={"goal_continue":"goalOK","uia_continue":"uiaOK","writer_busy":"writerBusy","usage_limit":"quotaWait"};
@@ -634,8 +637,9 @@ class ControlApi:
             codex = CodexState(d.codex_home)
             threads = codex.list_threads(limit=25)
             goals = {g["thread_id"]: g for g in codex.goals()}
+            busy = codex.busy_threads()
         except Exception:
-            threads, goals = [], {}
+            threads, goals, busy = [], {}, set()
         out_threads = []
         for info in threads:
             t = st.threads.get(info.id)
@@ -652,6 +656,13 @@ class ControlApi:
                 "effort": tc.get("reasoning_effort") or "",
                 "prompt": tc.get("prompt") or "",
                 "reset_card": bool(tc.get("reset_card")),
+                # honest run state for NON-goal threads: "running" when a
+                # live turn exists, "waiting" when a guarded thread is
+                # parked on a quota window. Anything else stays unlabeled.
+                "run": ("running" if info.id in busy else
+                        ("waiting" if (t and (t.tracked or t.manual)
+                         and t.last_kind in ("usage_primary", "usage_weekly"))
+                         else None)),
                 "resumes": (t.success_resumes if t else 0),
                 "attempts": (t.total_resumes if t else 0),
                 "last_outcome": t.last_outcome if t else "",
