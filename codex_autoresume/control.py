@@ -791,7 +791,10 @@ class ControlApi:
                 capped = False
                 rate_s = None
             elif P is not None and P >= 100:
-                eta_s = st.last_weekly_eta
+                # freeze only within a measured generation: with no pooled
+                # t (fresh install / upgrade) an old generation's ETA must
+                # not resurface
+                eta_s = st.last_weekly_eta if t is not None else None
                 capped = False
                 rate_s = None
             elif eta_s is not None:

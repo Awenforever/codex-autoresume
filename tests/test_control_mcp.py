@@ -95,6 +95,25 @@ class TestControlApi(unittest.TestCase):
         self.assertEqual(len(alpha), 1)
         self.assertFalse(alpha[0]["guard"])
 
+    def test_weekly_eta_freezes_only_with_a_measured_pool(self):
+        import time as _time
+        from codex_autoresume.ratelimits import QuotaSnapshot, Window
+        now = int(_time.time())
+        self.daemon._snapshot = QuotaSnapshot(
+            ordinary_usage_allowed=True,
+            primary=Window(used_percent=100, resets_at=now + 3600,
+                           window_duration_mins=300),
+            secondary=Window(used_percent=40, resets_at=now + 4 * 86400),
+            plan_type="plus")
+        self.daemon._usage_samples = []
+        st = self.daemon.state
+        st.last_weekly_eta = now + 50000          # pre-upgrade generation
+        q = self._get("/api/status")["quota"]
+        self.assertIsNone(q["eta_secondary"])
+        st.weekly_ratio_windows = [{"b": now, "dp": 100, "ds": 16}]
+        q = self._get("/api/status")["quota"]
+        self.assertEqual(q["eta_secondary"], now + 50000)
+
     def test_set_guard_toggles_and_persists(self):
         out = self._post("/api/threads/t-alpha",
                          {"guard": True, "weekly": True,
