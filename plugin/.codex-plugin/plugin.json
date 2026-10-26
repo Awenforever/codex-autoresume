@@ -1,6 +1,6 @@
 {
   "name": "codex-autoresume-guard",
-  "version": "0.3.42",
+  "version": "0.3.43",
   "description": "Control panel: http://127.0.0.1:8765 — auto-continue Codex conversations and goals after quota resets.",
   "author": {
     "name": "codex-autoresume contributors",

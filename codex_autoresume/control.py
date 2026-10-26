@@ -32,7 +32,7 @@ PANEL_HTML = r"""<!doctype html>
 --warnbg:#3a3320;--link:#7ec8ff;--tickmaj:#39424a;--tickmin:#242b30;
 --hovbd:#31403a;--tipbg:#20272c;--tipfg:#dfe6ea;--swbg:#2c343a;--swknob:#aab4bb;
 --ph:#5c666d;--accent-rgb:16,163,127;--warn-rgb:224,163,65;--shadow:rgba(0,0,0,.45);
---reset:#c9a6ff;--segthumb:#252d31;
+--reset:#c9a6ff;
 color-scheme:dark}
 body.light{--bg:#f5f7f7;--card:#ffffff;--card2:#eef2f2;--line:#dfe6e8;--fg:#1b272c;
 --dim:#64737a;--accent:#0d8a6a;--accent-soft:#e0f2ec;--warn:#a9741f;--danger:#cf443c;
@@ -40,7 +40,7 @@ body.light{--bg:#f5f7f7;--card:#ffffff;--card2:#eef2f2;--line:#dfe6e8;--fg:#1b27
 --warnbg:#f6ecd4;--link:#17749f;--tickmaj:#9fadb2;--tickmin:#d3dcde;
 --hovbd:#c9d8d2;--tipbg:#ffffff;--tipfg:#26343b;--swbg:#c6d2d6;--swknob:#ffffff;
 --ph:#9aa7ad;--accent-rgb:13,138,106;--warn-rgb:169,116,31;--shadow:rgba(23,42,50,.16);
---reset:#6a3fd1;--segthumb:#ffffff;
+--reset:#6a3fd1;
 color-scheme:light}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--fg);font:14px/1.55 -apple-system,"Segoe UI",
@@ -121,16 +121,13 @@ transition:border-color .15s,transform .1s}
 button:hover{border-color:var(--accent)} button:active{transform:scale(.97)}
 .btn-main{background:var(--accent-soft);border-color:rgba(var(--accent-rgb),.4);color:var(--accent)}
 .btn-mini{padding:5px 10px;font-size:12px;border-radius:8px}
-.themebar{display:inline-flex;align-items:center;gap:2px;padding:2px;flex:none;
-border:1px solid var(--line);border-radius:999px;background:var(--card2)}
-.tbtn{width:26px;height:22px;padding:0;display:inline-flex;align-items:center;
-justify-content:center;border:0;border-radius:999px;background:transparent;
-color:var(--dim);cursor:pointer;transition:background-color .2s,color .2s,box-shadow .2s}
-.tbtn:hover{color:var(--fg);border:0}
-.tbtn:active{transform:none}
-.tbtn.on{background:var(--segthumb);color:var(--fg);box-shadow:0 1px 3px var(--shadow)}
-.tbtn:focus-visible{outline:2px solid rgba(var(--accent-rgb),.5);outline-offset:1px}
-.tbtn svg{width:13px;height:13px;display:block}
+.btn-mini.theme{width:32px;min-width:32px;padding:0;height:26px;display:inline-flex;
+align-items:center;justify-content:center;color:var(--dim)}
+.btn-mini.theme:hover{color:var(--fg);border-color:var(--hovbd)}
+.btn-mini.theme svg{display:none}
+.btn-mini.theme[data-mode="auto"] .ic-auto,
+.btn-mini.theme[data-mode="light"] .ic-sun,
+.btn-mini.theme[data-mode="dark"] .ic-moon{display:block}
 .sect{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);
 text-transform:uppercase;letter-spacing:1px;margin:18px 2px 10px}
 .sect:after{content:"";flex:1;height:1px;background:var(--line)}
@@ -211,11 +208,7 @@ pointer-events:none;box-shadow:0 6px 24px var(--shadow)}
  stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
  <div><h1 data-i18n="title">Codex 守护</h1><div class="sub" data-i18n="sub">额度重置后自动继续任务 · 仅本机</div></div>
  <div class="hright" id="chips"></div>
- <div class="themebar" id="themeBar" role="group" aria-label="theme">
-  <button class="tbtn" data-theme="auto" onclick="setTheme('auto')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.2"/><path d="M12 3.8a8.2 8.2 0 0 1 0 16.4Z" fill="currentColor" stroke="none"/></svg></button>
-  <button class="tbtn" data-theme="light" onclick="setTheme('light')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.1"/><path d="M12 2.9v2.2M12 18.9v2.2M2.9 12h2.2M18.9 12h2.2M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/></svg></button>
-  <button class="tbtn" data-theme="dark" onclick="setTheme('dark')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20.4 14.2A8.6 8.6 0 0 1 9.8 3.6 8.6 8.6 0 1 0 20.4 14.2Z"/></svg></button>
- </div>
+ <button class="btn-mini theme" id="themeBtn" data-mode="auto" onclick="cycleTheme()"><svg class="ic-auto" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.2"/><path d="M12 3.8a8.2 8.2 0 0 1 0 16.4Z" fill="currentColor" stroke="none"/></svg><svg class="ic-sun" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.1"/><path d="M12 2.9v2.2M12 18.9v2.2M2.9 12h2.2M18.9 12h2.2M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/></svg><svg class="ic-moon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20.4 14.2A8.6 8.6 0 0 1 9.8 3.6 8.6 8.6 0 1 0 20.4 14.2Z"/></svg></button>
  <button class="btn-mini" style="flex:none;min-width:44px" id="langBtn" onclick="toggleLang()">CN</button>
  <button class="btn-mini" style="flex:none" data-i18n="refresh" onclick="refresh();toast(L('refreshed'))">刷新</button>
 </header>
@@ -546,7 +539,7 @@ function applyLang(){
 var els=document.querySelectorAll("[data-i18n]");
 for(var i=0;i<els.length;i++){els[i].textContent=L(els[i].getAttribute("data-i18n"))}
 var lb=document.getElementById("langBtn");if(lb){lb.textContent=(LNG==="en")?"EN":"CN"}
-var tg=document.getElementById("themeBar");if(tg){tg.setAttribute("aria-label",L("theme"));syncThemeUi()}
+var tb=document.getElementById("themeBtn");if(tb){syncThemeUi()}
 var ft=document.getElementById("foot");if(ft){ft.innerHTML=L("footer")}
 var ld=document.getElementById("ld");if(ld){ld.textContent=L("loading")}
 try{document.documentElement.lang=(LNG==="en")?"en":"zh-CN"}catch(e){}
@@ -596,13 +589,11 @@ if(_st==="auto"||_st==="light"||_st==="dark")THEME=_st}catch(e){}
 var MQL=(window.matchMedia?window.matchMedia("(prefers-color-scheme: light)"):null);
 function themeIsLight(){return THEME==="auto"?(MQL?!!MQL.matches:false):THEME==="light"}
 function syncThemeUi(){
-var bs=document.querySelectorAll("#themeBar .tbtn");
-for(var i=0;i<bs.length;i++){var m=bs[i].getAttribute("data-theme");
-var on=(m===THEME);bs[i].classList.toggle("on",on);
-try{bs[i].setAttribute("aria-pressed",on?"true":"false")}catch(e){}
-var k=(m==="auto")?"themeAuto":(m==="light")?"themeLight":"themeDark";
-var t=L(k);if(m==="auto"){t+=" · "+(themeIsLight()?L("themeLight"):L("themeDark"))}
-bs[i].title=t;bs[i].setAttribute("aria-label",t)}}
+var b=document.getElementById("themeBtn");if(!b)return;
+b.setAttribute("data-mode",THEME);
+var k=(THEME==="auto")?"themeAuto":(THEME==="light")?"themeLight":"themeDark";
+var t=L(k);if(THEME==="auto"){t+=" · "+(themeIsLight()?L("themeLight"):L("themeDark"))}
+b.title=t;b.setAttribute("aria-label",t)}
 function applyTheme(){var light=themeIsLight();
 document.body.classList.toggle("light",light);
 try{document.documentElement.style.colorScheme=light?"light":"dark"}catch(e){}
@@ -612,6 +603,7 @@ clearTimeout(_themeFade._t);
 _themeFade._t=setTimeout(function(){b.classList.remove("theming")},420)}
 function setTheme(m){THEME=m;try{localStorage.setItem("cgtheme",m)}catch(e){}
 _themeFade();applyTheme();if(typeof refresh==='function')refresh()}
+function cycleTheme(){setTheme(THEME==="auto"?"light":(THEME==="light"?"dark":"auto"))}
 function _themeFollow(){if(THEME!=="auto")return;_themeFade();applyTheme()}
 if(MQL){try{MQL.addEventListener("change",_themeFollow)}catch(e){
 if(MQL.addListener)MQL.addListener(_themeFollow)}}

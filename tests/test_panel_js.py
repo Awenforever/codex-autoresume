@@ -84,15 +84,43 @@ console.log(JSON.stringify(out));
 
 
 class PanelThemeTest(unittest.TestCase):
-    """Three-state theme: auto follows the live media query, not a boot read."""
+    """One theme button cycles auto/light/dark; auto follows the live media query."""
 
-    def test_segmented_control_has_three_modes(self):
+    def test_single_button_has_three_modes(self):
         from codex_autoresume.control import PANEL_HTML
-        for mode in ("auto", "light", "dark"):
-            self.assertIn('data-theme="%s"' % mode, PANEL_HTML)
+        self.assertIn('id="themeBtn"', PANEL_HTML)
+        self.assertIn('data-mode="auto"', PANEL_HTML)
+        self.assertIn('onclick="cycleTheme()"', PANEL_HTML)
+        self.assertNotIn("themebar", PANEL_HTML)
+        self.assertNotIn('data-theme="auto"', PANEL_HTML)
         self.assertIn('var THEME="auto"', PANEL_HTML)
         self.assertNotIn("toggleTheme", PANEL_HTML)
         self.assertIn('addEventListener("change",_themeFollow)', PANEL_HTML)
+
+    def test_cycle_order_auto_light_dark(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not installed")
+        from codex_autoresume.control import PANEL_HTML
+        js = re.search(r"<script>(.*)</script>", PANEL_HTML, re.S).group(1)
+        m = re.search(r"function cycleTheme\(\)\{[^\n]*\}", js)
+        self.assertTrue(m, "cycleTheme not found in panel script")
+        harness = m.group(0) + r"""
+const out = [THEME];
+for (let i = 0; i < 4; i++) { cycleTheme(); out.push(THEME); }
+console.log(JSON.stringify(out));
+"""
+        fd, path = tempfile.mkstemp(suffix=".js")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write('var THEME="auto";\nfunction setTheme(m){THEME=m}\n' + harness)
+            r = subprocess.run([node, path], capture_output=True, text=True,
+                               timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr[:2000])
+            got = json.loads(r.stdout.strip().splitlines()[-1])
+        finally:
+            os.unlink(path)
+        self.assertEqual(got, ["auto", "light", "dark", "auto", "light"])
 
     def test_auto_resolver_tracks_media_query(self):
         node = shutil.which("node")
