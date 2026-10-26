@@ -77,6 +77,11 @@ console.log(JSON.stringify(out));
         self.assertNotIn("hl-reset", preset)
         self.assertIn(self._rainbow("resets"), plural)
 
+    def test_reset_highlight_has_no_pill_background(self):
+        from codex_autoresume.control import PANEL_HTML
+        self.assertNotIn("--resetbg", PANEL_HTML)
+        self.assertRegex(PANEL_HTML, r"\.hl-reset\{font-weight:700\}")
+
 
 if __name__ == "__main__":
     unittest.main()

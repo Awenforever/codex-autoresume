@@ -470,19 +470,35 @@ def goal_continue(codex_bin: str, thread_id: str, model: str | None = None,
     client = AppServerClient(codex_bin)
     try:
         if model or effort:
+            import logging
+            log = logging.getLogger("codex-autoresume")
             params: dict = {"threadId": thread_id}
             if model:
                 params["model"] = model
             if effort:
                 params["effort"] = effort
+            # thread/settings/update only acts on threads loaded in THIS
+            # app-server process; a fresh client has none and would answer
+            # a misleading "thread not found". Probe first and only update
+            # a live thread; on probe failure keep the old attempt.
+            loaded_ids: set[str] | None = set()
             try:
-                client._rpc("thread/settings/update", params)
-            except RateLimitError as e:
-                import logging
-                logging.getLogger("codex-autoresume").info(
-                    "model/effort override skipped (%s); the desktop app "
-                    "holds the thread, so the goal continues with its own "
-                    "settings", str(e)[:140])
+                loaded = client._rpc("thread/loaded/list", {})
+                loaded_ids = {str(t).lower()
+                              for t in (loaded.get("data") or [])}
+            except RateLimitError:
+                loaded_ids = None
+            if loaded_ids is not None and thread_id.lower() not in loaded_ids:
+                log.info("model/effort override skipped: thread %s is not "
+                         "loaded in this app-server (settings apply only to "
+                         "live sessions); the goal continues with its own "
+                         "settings", thread_id)
+            else:
+                try:
+                    client._rpc("thread/settings/update", params)
+                except RateLimitError as e:
+                    log.info("model/effort override skipped (%s); the goal "
+                             "continues with its own settings", str(e)[:140])
         try:
             result = client._rpc("thread/goal/set", {
                 "threadId": thread_id, "status": "active", "origin": origin})

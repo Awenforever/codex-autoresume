@@ -93,5 +93,67 @@ class GoalResumeBusyHandlingTest(unittest.TestCase):
         self.assertEqual(errors, [])
 
 
+class GoalContinueSettingsTest(unittest.TestCase):
+    """thread/settings/update only acts on threads loaded in this app-server.
+
+    A fresh client has no loaded threads, so a blind update would answer a
+    misleading "thread not found"; the guard must probe and skip instead.
+    """
+
+    def _calls(self, loaded, model="m-1", effort="low", probe_error=False):
+        calls = []
+
+        class Client:
+            def __init__(self, codex_bin):
+                pass
+
+            def _rpc(self, method, params=None):
+                calls.append((method, params))
+                if method == "thread/loaded/list":
+                    if probe_error:
+                        raise rl.RateLimitError("loaded list unavailable")
+                    return {"data": loaded}
+                if method == "thread/settings/update":
+                    return {}
+                if method == "thread/goal/set":
+                    return {"goal": {"status": "active"}}
+                raise AssertionError("unexpected rpc " + method)
+
+            def close(self):
+                pass
+
+        with mock.patch.object(rl, "AppServerClient", Client):
+            rl.goal_continue("codex.exe", "thread-1",
+                             model=model, effort=effort)
+        return [m for m, _ in calls], calls
+
+    def test_loaded_thread_gets_settings_update(self):
+        methods, calls = self._calls(["thread-1"])
+        self.assertEqual(methods, ["thread/loaded/list",
+                                   "thread/settings/update",
+                                   "thread/goal/set"])
+        update = [p for m, p in calls if m == "thread/settings/update"][0]
+        self.assertEqual(update, {"threadId": "thread-1",
+                                  "model": "m-1", "effort": "low"})
+
+    def test_unloaded_thread_skips_settings_update(self):
+        methods, _ = self._calls(["other-thread"])
+        self.assertEqual(methods, ["thread/loaded/list", "thread/goal/set"])
+
+    def test_loaded_list_is_case_insensitive(self):
+        methods, _ = self._calls(["THREAD-1"])
+        self.assertIn("thread/settings/update", methods)
+
+    def test_no_override_skips_loaded_probe(self):
+        methods, _ = self._calls([], model=None, effort=None)
+        self.assertEqual(methods, ["thread/goal/set"])
+
+    def test_probe_failure_keeps_old_attempt(self):
+        methods, _ = self._calls([], probe_error=True)
+        self.assertEqual(methods, ["thread/loaded/list",
+                                   "thread/settings/update",
+                                   "thread/goal/set"])
+
+
 if __name__ == "__main__":
     unittest.main()
