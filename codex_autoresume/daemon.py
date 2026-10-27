@@ -12,7 +12,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
-from . import __version__
+from . import __version__, updater
 from .codexenv import CodexEnvError, CodexState, find_codex_bin
 from .config import (ConfigError, load_config, resolve_codex_home,
                      resolve_state_dir, thread_config)
@@ -73,6 +73,12 @@ class Daemon:
         self._notified_credits = False
         self._announcement: dict | None = None
         self._announcement_at: float = 0.0
+        self._update: dict | None = None
+        self._update_at: float = 0.0
+        self._update_last = updater.read_last(self.state_dir)
+        self._update_started = False
+        self._exit_after: float | None = None
+        self._wake = threading.Event()
         self._last_spawn_fallback: float = 0.0
         self._state_mtime: float = 0.0
         self._resume_pool = ThreadPoolExecutor(
@@ -127,6 +133,13 @@ class Daemon:
                          "(watermark=%d)", len(self.state.seen_sources),
                          self.state.turns_watermark)
             while True:
+                if self._update_started:
+                    # the panel got its response; exit so the detached
+                    # helper can replace the code and start a new daemon
+                    remain = (self._exit_after or 0.0) - time.monotonic()
+                    if remain > 0:
+                        self._wake.wait(remain)
+                    break
                 try:
                     self.tick()
                 except Exception:
@@ -134,7 +147,8 @@ class Daemon:
                 save_state(self.state)
                 if once:
                     break
-                time.sleep(self._sleep_seconds())
+                self._wake.wait(self._sleep_seconds())
+                self._wake.clear()
         except KeyboardInterrupt:
             log.info("interrupted; shutting down")
         finally:
@@ -165,6 +179,9 @@ class Daemon:
 
     def tick(self) -> None:
         assert self.state is not None
+        # independent of watching: paused daemons (and a broken Codex DB)
+        # must still be able to offer an update in the panel
+        self.update_info()
         now = _now()
         self._sync_external_edits()
         if self.state.paused:
@@ -420,22 +437,136 @@ class Daemon:
         self._seen_credit_ids = ids
 
     def announcement(self) -> dict | None:
-        """External reset-announcement feed (cached ~5 min, best-effort)."""
-        if (self._announcement is not None
-                and time.monotonic() - self._announcement_at < 300):
-            return self._announcement
-        from .announcements import fetch_announcement, DEFAULT_URL
+        """Merged Tibo news feed (cached, best-effort)."""
         acfg = self.cfg.get("announcements", {}) or {}
         if acfg.get("enabled") is False:
             return None
-        url = acfg.get("url", DEFAULT_URL)
-        self._announcement = fetch_announcement(url)
+        refresh = float(acfg.get("refresh_sec", 120) or 120)
+        if (self._announcement is not None
+                and time.monotonic() - self._announcement_at < refresh):
+            return self._announcement
+        from .announcements import (CODEX_RESET_URL, DEFAULT_URL,
+                                    WILLRESET_URL, fetch_news)
+        ann = fetch_news(
+            acfg.get("url", DEFAULT_URL),
+            acfg.get("codex_reset_url", CODEX_RESET_URL),
+            acfg.get("willreset_url", WILLRESET_URL),
+            float(acfg.get("timeout_sec", 10) or 10))
+        self._announcement = ann
         self._announcement_at = time.monotonic()
-        if self._announcement.get("latest_reset"):
+        src = ann.get("sources") or {}
+        log.info("news sync: %d posts (codex-reset=%d%s, willreset=%d%s, "
+                 "opentherank=%d%s)",
+                 len(ann.get("posts") or []),
+                 src.get("codex-reset", {}).get("posts", 0),
+                 "" if src.get("codex-reset", {}).get("ok") else "!",
+                 src.get("willreset", {}).get("posts", 0),
+                 "" if src.get("willreset", {}).get("ok") else "!",
+                 src.get("opentherank", {}).get("posts", 0),
+                 "" if src.get("opentherank", {}).get("ok") else "!")
+        if ann.get("latest_reset"):
             log.info("reset tracker: latest=%s landing=%s",
-                     self._announcement.get("latest_reset"),
-                     self._announcement.get("landing"))
-        return self._announcement
+                     ann.get("latest_reset"), ann.get("landing"))
+        return ann
+
+    # ------------------------------------------------------------- updates
+
+    def cached_update(self) -> dict:
+        """Cache-only update snapshot for /api/status (never fetches)."""
+        ucfg = self.cfg.get("update") or {}
+        if self._update is None:
+            return {"enabled": ucfg.get("enabled") is not False,
+                    "current": __version__, "latest": None,
+                    "available": False, "can_update": False,
+                    "reason": "check has not run yet",
+                    "in_progress": self._update_started,
+                    "last": self._update_last}
+        out = dict(self._update)
+        out["in_progress"] = self._update_started
+        out["last"] = self._update_last
+        return out
+
+    def update_info(self, force: bool = False) -> dict:
+        """Latest-release check (cached for ``[update].check_sec``)."""
+        ucfg = self.cfg.get("update") or {}
+        if ucfg.get("enabled") is False:
+            self._update = {"enabled": False, "current": __version__,
+                            "latest": None, "available": False,
+                            "can_update": False,
+                            "reason": "update checks are disabled"}
+            return self.cached_update()
+        refresh = float(ucfg.get("check_sec", 86400) or 86400)
+        if (not force and self._update is not None
+                and time.monotonic() - self._update_at < refresh):
+            return self.cached_update()
+        info: dict = {"enabled": True, "current": __version__,
+                      "latest": None, "tag": None, "url": "",
+                      "published_at": "", "available": False,
+                      "can_update": False, "reason": "", "error": "",
+                      "checked_at": _now().isoformat(timespec="seconds")}
+        try:
+            rel = updater.fetch_latest_release(
+                str(ucfg.get("release_url")
+                    or updater.DEFAULT_RELEASE_URL),
+                float(ucfg.get("timeout_sec", 8) or 8))
+            info.update({"latest": rel["version"], "tag": rel["tag"],
+                         "url": rel["url"],
+                         "published_at": rel["published_at"]})
+            info["available"] = updater.is_newer(rel["version"],
+                                                 __version__)
+            if info["available"]:
+                ok, reason, _src = updater.preflight(self.cfg)
+                info["can_update"] = ok
+                info["reason"] = reason
+                log.info("update available: %s (current %s)%s",
+                         rel["version"], __version__,
+                         "" if ok else " -- cannot update: " + reason)
+        except Exception as e:
+            # network/proxy hiccups are not fatal; retry next interval
+            info["error"] = str(e)[:300]
+            log.warning("update check failed: %s", e)
+        self._update = info
+        self._update_at = time.monotonic()
+        return self.cached_update()
+
+    def begin_update(self) -> dict:
+        """Start the detached updater; the run loop exits right after."""
+        if self._update_started:
+            return {"started": False,
+                    "error": "an update is already in progress"}
+        info = self.update_info()
+        if not info.get("available"):
+            return {"started": False,
+                    "error": info.get("error")
+                    or "this install is already up to date"}
+        with self._inflight_lock:
+            busy = bool(self._inflight)
+        if busy:
+            return {"started": False,
+                    "error": "a resume is in progress; try again shortly"}
+        ok, reason, src = updater.preflight(self.cfg)
+        if not ok or src is None:
+            return {"started": False, "error": reason or "update unavailable"}
+        try:
+            release = {"tag": info.get("tag"),
+                       "version": info.get("latest")}
+            job = updater.build_job(self.cfg, self.state_dir,
+                                    self.codex_bin, src, release,
+                                    __version__)
+            helper = updater.write_helper(self.state_dir)
+            updater.launch_helper(helper, job)
+        except Exception as e:
+            log.exception("failed to start the updater")
+            return {"started": False, "error": str(e)[:300]}
+        self._update_started = True
+        self._update = dict(info, in_progress=True)
+        self._exit_after = time.monotonic() + 2.5
+        self._wake.set()
+        log.info("self-update started: %s -> %s (helper pid job=%s)",
+                 __version__, info.get("latest"),
+                 os.path.basename(job["job_path"]))
+        return {"started": True, "from": __version__,
+                "to": info.get("latest")}
 
     def _maybe_consume_reset_card(self, snapshot) -> None:
         """Auto-redeem a reset credit when the weekly window is exhausted.
@@ -752,22 +883,23 @@ class Daemon:
         return eff
 
     def _log_announcement(self, ann: dict | None) -> None:
-        """Keep news_log as a normalized mirror of the tracker's timeline.
+        """Keep news_log as a normalized mirror of the merged timelines.
 
-        The PAGE is the source of truth: rebuild the log from its posts
-        (last 48h, oldest to newest) on every sync. Entries carry each
-        post's own publication time. When the page cannot be parsed, the
-        stored log is left untouched — never append fetch-time entries.
+        The SOURCES are the source of truth: rebuild the log from their
+        posts (last 48h, oldest to newest) on every sync. Entries carry
+        each post's own publication time and X id when known. When no
+        source yields posts, the stored log is left untouched — never
+        append fetch-time entries.
         """
         try:
-            from datetime import datetime as _dt, timedelta as _td, timezone
             posts = [p for p in ((ann or {}).get("posts") or [])
                      if _post_age_hours(p.get("at", "")) <= 48]
             if not posts:
                 return
             posts.sort(key=lambda q: q.get("at", ""))
             normalized = [{"at": q["at"], "text": q["text"],
-                           "kind": "post", "key": q["at"]}
+                           "kind": q.get("kind") or "post",
+                           "key": q.get("id") or q["at"]}
                           for q in posts]
             st = self.state
             if st.news_log != normalized:
@@ -949,6 +1081,8 @@ class Daemon:
     # -------------------------------------------------------------- resumes
 
     def _launch_resume(self, thread_id: str, t, decision, info) -> None:
+        if self._update_started:
+            return
         # send-time recheck: an interruption may have established a window
         # limit while this decision was being made
         lim = self._active_limit()

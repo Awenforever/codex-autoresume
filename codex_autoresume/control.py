@@ -7,6 +7,7 @@ skill / curl) uses to read state and toggle per-thread guarding:
     GET  /api/status        -> {paused, dry_run, quota, threads: [...]}
     POST /api/threads/<id>  -> {guard?, weekly?, model?, effort?}
     POST /api/pause         -> {paused: bool}
+    POST /api/update        -> {confirm: true}  (self-update + restart)
 
 All writes land in the watcher state file; the running daemon picks them up
 on its next tick (live sync), so toggles take effect within seconds.
@@ -20,6 +21,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .state import load_state, save_state
+from . import __version__
 
 PANEL_HTML = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -54,7 +56,36 @@ header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
 #10a37f,#0a6e56);display:flex;align-items:center;justify-content:center;
 box-shadow:0 4px 18px rgba(var(--accent-rgb),.35)}
 .logo svg{width:22px;height:22px}
+.logowrap{position:relative;flex:none;line-height:0}
+button.logo{border:none;padding:0;cursor:default}
+button.logo:active{transform:none}
+.logowrap.upd button.logo{cursor:pointer}
+.logowrap.upd button.logo:hover{filter:brightness(1.09)}
+button.logo:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.upddot{display:none;position:absolute;top:-2px;right:-2px;width:11px;height:11px;
+border-radius:50%;background:#ff4d4f;border:2px solid var(--bg);
+animation:updpulse 2s infinite}
+.logowrap.upd .upddot{display:block}
+@keyframes updpulse{0%{box-shadow:0 0 0 0 rgba(255,77,79,.55)}
+70%{box-shadow:0 0 0 7px rgba(255,77,79,0)}100%{box-shadow:0 0 0 0 rgba(255,77,79,0)}}
+#updOverlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;
+align-items:center;justify-content:center;z-index:10000;padding:20px}
+#updOverlay.show{display:flex}
+.modal{background:var(--card);border:1px solid var(--line);border-radius:16px;
+padding:20px 22px;max-width:430px;width:100%;box-shadow:0 18px 60px var(--shadow)}
+.mtitle{font-size:16px;font-weight:650;margin-bottom:10px}
+.mver{display:flex;align-items:center;gap:10px;font-size:13px;
+color:var(--dim);margin-bottom:10px}
+.mver b{color:var(--accent);font-size:14px}
+.mnote{font-size:12.5px;color:var(--dim);line-height:1.7;margin-bottom:16px}
+.mbtns{display:flex;justify-content:flex-end;gap:9px}
+.mbtns button{padding:7px 14px;border-radius:9px;font-size:13px;cursor:pointer}
+.mbtns .primary{background:var(--accent);border-color:var(--accent);
+color:#fff;font-weight:600}
+.mbtns button:disabled{opacity:.55;cursor:default}
 h1{font-size:17px;font-weight:650;letter-spacing:.2px}
+.hrow{display:flex;align-items:baseline;gap:7px}
+.ver{font-size:11px;font-weight:500;color:var(--dim);opacity:.72;letter-spacing:.2px}
 .sub{font-size:12px;color:var(--dim);margin-top:1px}
 .hright{margin-left:auto;display:flex;gap:8px;align-items:center}
 .chip{font-size:12px;border-radius:999px;padding:4px 12px;font-weight:600;
@@ -202,10 +233,10 @@ pointer-events:none;box-shadow:0 6px 24px var(--shadow)}
 .controls,.controls2{gap:10px}input[type=text]{width:118px}}
 </style></head><body>
 <header>
- <div class="logo"><svg viewBox="0 0 64 64"><path d="M32 4 54 12v18c0 15-9.5 25.5-22 30C19.5 55.5 10 45 10 30V12Z"
+ <div class="logowrap" id="logoWrap"><button class="logo" id="logoBtn" onclick="openUpdate()" aria-label="Codex Guard"><svg viewBox="0 0 64 64"><path d="M32 4 54 12v18c0 15-9.5 25.5-22 30C19.5 55.5 10 45 10 30V12Z"
  fill="none" stroke="#fff" stroke-width="5"/><path d="M21 32.5 29 40.5 43 25" fill="none"
- stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
- <div><h1 data-i18n="title">Codex Guard</h1><div class="sub" data-i18n="sub">Auto-continue conversations after quota resets</div></div>
+ stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></button><span class="upddot" id="updDot"></span></div>
+ <div><div class="hrow"><h1 data-i18n="title">Codex Guard</h1><span class="ver">v__CXR_VERSION__</span></div><div class="sub" data-i18n="sub">Auto-continue conversations after quota resets</div></div>
  <div class="hright" id="chips"></div>
  <button class="btn-mini theme" id="themeBtn" data-mode="auto" onclick="cycleTheme()"><svg class="ic-auto" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.2"/><path d="M12 3.8a8.2 8.2 0 0 1 0 16.4Z" fill="currentColor" stroke="none"/></svg><svg class="ic-sun" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.1"/><path d="M12 2.9v2.2M12 18.9v2.2M2.9 12h2.2M18.9 12h2.2M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/></svg><svg class="ic-moon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20.4 14.2A8.6 8.6 0 0 1 9.8 3.6 8.6 8.6 0 1 0 20.4 14.2Z"/></svg></button>
  <button class="btn-mini icon" id="langBtn" onclick="toggleLang()" aria-label="Language"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.4"/><path d="M3.6 12h16.8M12 3.6c2.5 2.3 3.8 5.1 3.8 8.4s-1.3 6.1-3.8 8.4c-2.5-2.3-3.8-5.1-3.8-8.4s1.3-6.1 3.8-8.4Z"/></svg></button>
@@ -246,6 +277,14 @@ pointer-events:none;box-shadow:0 6px 24px var(--shadow)}
 <div class="sect" data-i18n="recent">Recent conversations</div>
 <div id="threads"></div>
 <div class="foot" id="foot"></div>
+<div id="updOverlay" onclick="if(event.target===this)closeUpdate()">
+ <div class="modal">
+  <div class="mtitle" data-i18n="updTitle">Update available</div>
+  <div class="mver"><span>v<span id="updFrom"></span></span><span>→</span><b>v<span id="updTo"></span></b></div>
+  <div class="mnote" id="updNote"></div>
+  <div class="mbtns"><button class="mclose" id="updCancel" onclick="closeUpdate()" data-i18n="updCancel">Later</button><button class="primary" id="updGo" onclick="runUpdate()" data-i18n="updGo">Update &amp; restart</button></div>
+ </div>
+</div>
 <div id="toast"></div>
 <script>
 var eff=["","none","minimal","low","medium","high","xhigh"];
@@ -274,6 +313,7 @@ goalOK:"✓ 已自动继续",uiaOK:"✓ 已点继续",writerBusy:"会话被 Code
 errConn:"无法连接守护进程：",errTimeout:"请求超时（8 秒无响应）",errFail:"连接失败",
 errHint:"。面板每 15 秒自动重试；若持续失败，请确认守护进程在运行：",
 upd:"已更新",restored:"已恢复默认指令",pauseOK:"守护已暂停",resumeOK:"守护已恢复",
+updTitle:"发现新版本",updTip:"可升级到 v",updNote:"守护进程会自动更新代码并重启；正在进行的对话和额度不受影响。面板会自动重新连接。",updCancel:"稍后",updGo:"更新并重启",updStarting:"正在准备升级…",updRestarting:"正在升级并重启守护进程，面板会自动重新连接…",updFailed:"升级未能启动：",updLastFail:"上次升级未完成：",updSlow:"升级耗时较长——请查看 update.log，或手动重启守护进程。",
 footer:"打开方式：侧栏输入 <code>http://127.0.0.1:8765</code>（推荐，不消耗额度）· 桌面快捷方式 · 完整说明见插件 README"},
 en:{title:"Codex Guard",sub:"Auto-continue conversations after quota resets",
 langTip:"Language: English (click to switch)",loading:"Loading…",theme:"Theme",themeAuto:"Follow system",themeLight:"Light",themeDark:"Dark",w5:"5h window",wk:"Weekly",reset:"Resets",
@@ -301,6 +341,7 @@ errFail:"connection failed",
 errHint:". The panel retries every 15s; if this persists, start the daemon: ",
 upd:"Saved",restored:"Prompt reset to default",pauseOK:"Paused all",
 resumeOK:"Resumed all",
+updTitle:"Update available",updTip:"Update available: v",updNote:"The guard will update its code and restart. Conversations and quota are unaffected; this panel reconnects automatically.",updCancel:"Later",updGo:"Update & restart",updStarting:"Preparing update…",updRestarting:"Updating and restarting the guard; this panel reconnects automatically…",updFailed:"Update could not start: ",updLastFail:"Last update did not finish: ",updSlow:"This is taking longer than usual — check update.log or restart the daemon manually.",
 footer:"Open: type <code>http://127.0.0.1:8765</code> in the sidebar (recommended, no quota cost) · desktop shortcut · full docs in the plugin README"}};
 function L(k){var d=I18N[LNG]||I18N.zh;var v=d[k];
 return (v===undefined)?(I18N.zh[k]||k):v}
@@ -424,9 +465,68 @@ function annRowsFor(s){
  rows+=kvRow(L("landed"),'<b class="ok">'+esc(landTxt)+"</b>");
  rows+=newsBox(s)
  return rows}
+function syncUpdateUi(s){
+ var u=(s&&s.update)||null;
+ var wrap=document.getElementById("logoWrap");
+ var b=document.getElementById("logoBtn");
+ var show=!!(u&&u.available&&u.can_update&&!u.in_progress);
+ if(wrap){wrap.classList.toggle("upd",show)}
+ if(b){b.title=show?(L("updTip")+u.latest):""}
+ if(!window.__updating)return;
+ var last=u&&u.last;
+ if(u&&!u.in_progress&&(!u.available||
+   (last&&last.at&&last.at!==window.__updBase))){location.reload();return}
+ var note=document.getElementById("updNote");
+ if(note){note.textContent=L("updRestarting")}
+}
+function openUpdate(){
+ var u=(window.__s&&window.__s.update)||null;
+ if(!u||!u.available||!u.can_update||u.in_progress){return}
+ document.getElementById("updFrom").textContent=u.current||"";
+ document.getElementById("updTo").textContent=u.latest||"";
+ var note=L("updNote");
+ if(u.last&&u.last.status&&u.last.status!=="ok"&&u.last.error){
+  note+=" "+L("updLastFail")+u.last.error}
+ document.getElementById("updNote").textContent=note;
+ var go=document.getElementById("updGo");
+ go.disabled=false;go.textContent=L("updGo");
+ var c=document.getElementById("updCancel");c.disabled=false;
+ document.getElementById("updOverlay").classList.add("show");
+}
+function closeUpdate(){
+ if(window.__updating)return;
+ document.getElementById("updOverlay").classList.remove("show");
+}
+function runUpdate(){
+ if(window.__updating)return;
+ var u=(window.__s&&window.__s.update)||null;
+ window.__updBase=(u&&u.last&&u.last.at)||"";
+ var go=document.getElementById("updGo");
+ go.disabled=true;go.textContent=L("updStarting");
+ api("/api/update",{confirm:true}).then(function(r){
+  if(r&&r.started){
+   window.__updating=true;
+   document.getElementById("updNote").textContent=L("updRestarting");
+   document.getElementById("updCancel").disabled=true;
+   setTimeout(function(){
+    if(window.__updating){
+     var n=document.getElementById("updNote");if(n){n.textContent=L("updSlow")}}
+   },180000);
+  }else{
+   go.disabled=false;go.textContent=L("updGo");
+   document.getElementById("updNote").textContent=
+    L("updFailed")+((r&&r.error)||L("unknown"));
+  }
+ }).catch(function(e){
+  go.disabled=false;go.textContent=L("updGo");
+  document.getElementById("updNote").textContent=
+   L("updFailed")+((e&&e.message)||L("errFail"));
+ });
+}
 function refresh(){
 return api("/api/status").then(function(s){
 window.__s=s;
+syncUpdateUi(s);
 var q=s.quota;
 var annRows=annRowsFor(s);
 var ringrow=document.getElementById("ringrow");
@@ -525,6 +625,10 @@ document.getElementById("threads").innerHTML=rows||
 var nb=document.getElementById("newsbox");
 if(nb){nb.scrollTop=nb.scrollHeight}
 }).catch(function(e){
+if(window.__updating){
+ document.getElementById("hinfo").innerHTML=
+ '<div style="color:var(--dim);font-size:13px">'+L("updRestarting")+"</div>";
+ return}
 var why=(e&&e.message==="timeout")?L("errTimeout"):L("errFail");
 document.getElementById("hinfo").innerHTML=
 '<div style="color:var(--danger);font-size:13px">'+L("errConn")+why+L("errHint")+
@@ -613,6 +717,8 @@ if(!document.hidden){refresh()}});
 window.addEventListener("focus",function(){refresh()});
 </script></body></html>"""
 
+PANEL_HTML = PANEL_HTML.replace("__CXR_VERSION__", __version__)
+
 
 
 
@@ -679,6 +785,12 @@ class ControlApi:
                         return
                 if self.path == "/api/pause":
                     self._json(api.set_paused(bool(payload.get("paused"))))
+                    return
+                if self.path == "/api/update":
+                    if payload.get("confirm") is not True:
+                        self._json({"error": "confirmation required"}, 400)
+                        return
+                    self._json(api.start_update())
                     return
                 if self.path.startswith("/api/threads/"):
                     tid = self.path[len("/api/threads/"):].strip("/")
@@ -825,6 +937,10 @@ class ControlApi:
                          if c.expires_at), default=None) or None),
             }
         ann = d.cached_announcement()
+        if ann and ann.get("posts"):
+            # the panel renders news_log; the raw 80-post merge would only
+            # bloat every status poll
+            ann = {k: v for k, v in ann.items() if k != "posts"}
         return {
             "paused": bool(st and st.paused),
             "dry_run": bool(d.cfg["general"]["dry_run"]),
@@ -835,8 +951,18 @@ class ControlApi:
             "credit_events": list((st.credit_events if st else []))[-5:],
             "reset_events": list((st.reset_events if st else []))[-8:],
             "news_log": list((st.news_log if st else []))[-60:],
+            "update": d.cached_update(),
             "threads": out_threads,
         }
+
+    def start_update(self) -> dict:
+        fn = getattr(self.daemon, "begin_update", None)
+        if fn is None:
+            return {"started": False, "error": "update is not supported"}
+        try:
+            return fn()
+        except Exception as e:     # never let the panel see a stack trace
+            return {"started": False, "error": str(e)[:300]}
 
     def set_paused(self, paused: bool) -> dict:
         st = self.daemon.state

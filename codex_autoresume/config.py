@@ -121,11 +121,37 @@ DEFAULTS: dict[str, Any] = {
         "host": "127.0.0.1",
         "port": 8765,
     },
-    # external reset-announcement tracker (Tibo reset feed); fetched by the
-    # daemon in the background, never from HTTP handlers
+    # external Tibo news timeline (reset announcements + ordinary posts from
+    # several public trackers); fetched by the daemon in the background,
+    # never from HTTP handlers
     "announcements": {
         "enabled": True,
-        # "url": "https://opentherank.com/codex-reset"
+        # how often the three sources are re-fetched (seconds)
+        "refresh_sec": 120,
+        "timeout_sec": 10,
+        # reset announcements / forecast banner (HTML)
+        # "url": "https://opentherank.com/codex-reset",
+        # structured X timeline incl. ship/feature days (JSON)
+        # "codex_reset_url": "https://codex-reset.com/api/feed",
+        # full recent Tibo timeline incl. ordinary posts (HTML)
+        # "willreset_url": "https://willreset.com/tibo",
+    },
+    # self-update: check the latest GitHub release and let the panel offer a
+    # one-click update (detached helper; the daemon restarts itself)
+    "update": {
+        "enabled": True,
+        # how often the release feed is re-checked (seconds)
+        "check_sec": 86400,
+        "timeout_sec": 8,
+        # latest-release JSON (GitHub-compatible)
+        "release_url": ("https://api.github.com/repos/Awenforever/"
+                        "codex-autoresume/releases/latest"),
+        # force a checkout path when the running package is not inside it
+        "repo": "",
+        # pip installs: package source used by the helper
+        "pip_source": "git+https://github.com/Awenforever/codex-autoresume",
+        # refresh this Codex plugin after a successful update; "" disables
+        "plugin_spec": "codex-autoresume-guard@codex-autoresume",
     },
     # per-thread overrides, keyed by thread UUID (full or prefix):
     # [threads."01a05ddb-0483-..."]

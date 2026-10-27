@@ -54,6 +54,14 @@ class _StubDaemon:
     def cached_announcement(self):
         return self.announcement()
 
+    def cached_update(self):
+        return {"enabled": True, "current": "test", "latest": None,
+                "available": False, "can_update": False, "reason": "",
+                "in_progress": False, "last": None}
+
+    def begin_update(self):
+        return {"started": True, "from": "test", "to": "9.9.9"}
+
 
 class TestControlApi(unittest.TestCase):
     def setUp(self):
@@ -91,9 +99,24 @@ class TestControlApi(unittest.TestCase):
         s = self._get("/api/status")
         self.assertTrue(s["dry_run"])
         self.assertFalse(s["paused"])
+        self.assertFalse(s["update"]["available"])
         alpha = [t for t in s["threads"] if t["id"] == "t-alpha"]
         self.assertEqual(len(alpha), 1)
         self.assertFalse(alpha[0]["guard"])
+
+    def test_update_requires_explicit_confirmation(self):
+        req = urllib.request.Request(
+            self.base + "/api/update", data=b'{"confirm": false}',
+            headers={"Content-Type": "application/json"}, method="POST")
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(ctx.exception.code, 400)
+        ctx.exception.close()
+
+    def test_update_endpoint_starts_update(self):
+        out = self._post("/api/update", {"confirm": True})
+        self.assertTrue(out["started"])
+        self.assertEqual(out["to"], "9.9.9")
 
     def test_weekly_eta_freezes_only_with_a_measured_pool(self):
         import time as _time

@@ -20,6 +20,7 @@ def _daemon_stub() -> Daemon:
     d._snapshot = None
     d._snapshot_at = 0.0
     d._state_mtime = 0.0
+    d._update_started = False
     return d
 
 

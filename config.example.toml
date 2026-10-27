@@ -71,6 +71,25 @@ use_app_server = true           # authoritative gate via codex app-server
 poll_sec = 60
 recovery_used_percent_max = 95  # fallback gate when allowed-flag is null
 
+[update]
+# Daily latest-release check. When a newer release exists, the panel logo
+# shows a red dot; one confirmed click updates the code and restarts the
+# daemon. Source checkouts update with `git pull --ff-only` (they must be
+# clean and have an upstream); pip installs use `pip_source`.
+enabled = true
+check_sec = 86400
+timeout_sec = 8
+# release_url = "https://api.github.com/repos/Awenforever/codex-autoresume/releases/latest"
+
+# pip installs: package source upgraded by the helper (pinned to the tag)
+pip_source = "git+https://github.com/Awenforever/codex-autoresume"
+
+# Force a checkout path when the running package is not inside it.
+# repo = "C:/Users/me/codex-autoresume"
+
+# Refresh this Codex plugin cache after a successful update; "" disables.
+plugin_spec = "codex-autoresume-guard@codex-autoresume"
+
 # ---------------------------------------------------------------------------
 # Per-thread overrides (keyed by full or prefix thread UUID).
 #

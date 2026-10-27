@@ -31,6 +31,7 @@ def _daemon_stub() -> Daemon:
     d._snapshot = None
     d._snapshot_at = 0.0
     d._state_mtime = 0.0
+    d._update_started = False
     d._inflight = {}
     d._inflight_lock = threading.Lock()
     d._resume_pool = _FakePool()

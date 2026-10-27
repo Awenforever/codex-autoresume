@@ -198,6 +198,26 @@ console.log(JSON.stringify([capped, plain]));
         self.assertIn("6.2%/h", plain)
 
 
+class PanelVersionTest(unittest.TestCase):
+    """The running daemon's version sits next to the title in muted gray."""
+
+    def test_version_next_to_title(self):
+        import codex_autoresume
+        from codex_autoresume.control import PANEL_HTML
+        self.assertIn('<span class="ver">v%s</span>'
+                      % codex_autoresume.__version__, PANEL_HTML)
+        self.assertNotIn("__CXR_VERSION__", PANEL_HTML)
+        self.assertRegex(PANEL_HTML,
+                         r"\.ver\{[^}]*font-size:11px[^}]*color:var\(--dim\)")
+
+    def test_version_survives_language_switch(self):
+        from codex_autoresume.control import PANEL_HTML
+        # applyLang() rewrites textContent of [data-i18n]; the version span
+        # must stay OUTSIDE the h1 or switching language would erase it
+        self.assertIn('<h1 data-i18n="title">Codex Guard</h1>'
+                      '<span class="ver">', PANEL_HTML)
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -307,3 +327,29 @@ class PanelI18nCoverageTest(unittest.TestCase):
             missing += [lang + ":" + k for k in miss]
         self.assertEqual(missing, [],
                          "i18n keys used but not defined: %s" % missing)
+
+
+class PanelUpdateUiTest(unittest.TestCase):
+    """Red dot on the logo + confirmation modal for self-update."""
+
+    def test_logo_is_the_update_button_with_a_dot(self):
+        from codex_autoresume.control import PANEL_HTML
+        self.assertIn('id="logoWrap"', PANEL_HTML)
+        self.assertIn('id="logoBtn"', PANEL_HTML)
+        self.assertIn('onclick="openUpdate()"', PANEL_HTML)
+        self.assertIn('id="updDot"', PANEL_HTML)
+        self.assertIn('<div id="updOverlay"', PANEL_HTML)
+        self.assertIn('id="updGo"', PANEL_HTML)
+        self.assertRegex(PANEL_HTML, r"\.upddot\{[^}]*background:#ff4d4f")
+        self.assertRegex(PANEL_HTML, r"\.logowrap\.upd \.upddot\{display:block\}")
+
+    def test_update_requires_the_confirmed_api_call(self):
+        from codex_autoresume.control import PANEL_HTML
+        self.assertIn('api("/api/update",{confirm:true})', PANEL_HTML)
+        self.assertIn("syncUpdateUi(s)", PANEL_HTML)
+
+    def test_update_strings_are_bilingual(self):
+        from codex_autoresume.control import PANEL_HTML
+        for key in ("updTitle", "updNote", "updGo", "updRestarting",
+                    "updFailed", "updSlow"):
+            self.assertEqual(PANEL_HTML.count(key + ':'), 2, key)

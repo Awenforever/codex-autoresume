@@ -59,8 +59,14 @@ Codex Guard does that for you, and it does it the way you would:
 - **A control panel worth opening.** Dark & light themes (follows your
   system, remembers your pick), bilingual (CN/EN), dual analog clocks
   (local + Pacific), pressure-colored quota rings, the
-  official reset forecast / observed landing / news log — served on
+  official reset forecast / observed landing / merged Tibo news timeline
+  (reset tracker plus two X mirrors, refreshed every 2 minutes) — served on
   `127.0.0.1:8765`, costs no quota.
+- **Updates itself from the panel.** The guard checks GitHub for a newer
+  release once a day. When one exists, a small red dot appears on the
+  logo — click it, confirm, and the guard updates itself and restarts
+  (source checkout: fast-forward `git pull`; pip install: `pip install -U`),
+  reconnecting the panel when it is back.
 - **Private and honest by design.** Reads Codex's local databases
   read-only, one lightweight usage HTTP poll through your system proxy,
   no telemetry, no accounts, localhost-only panel. Every ETA shown is
@@ -111,6 +117,33 @@ codex-autoresume uninstall                                  # daemon
 codex plugin remove codex-autoresume-guard@codex-autoresume # plugin
 codex plugin marketplace remove codex-autoresume            # marketplace
 ```
+
+Upgrade an existing install:
+
+The panel checks GitHub for a newer release once a day. When one exists, a
+small red dot appears on the Codex Guard logo — click it, confirm, and the
+guard updates itself and restarts (source checkout: `git pull --ff-only`;
+pip install: `pip install -U` against `[update] pip_source`), and the panel
+reconnects automatically. Self-update needs a clean checkout with an
+upstream, or a pip install with a configured `pip_source`; disable it with
+`[update] enabled = false`.
+
+Manual upgrade (fallback):
+
+```bash
+git pull --ff-only                    # in the cloned repo / local marketplace
+pip install -U .                      # same Python that provides codex-autoresume
+codex plugin add codex-autoresume-guard@codex-autoresume   # re-add = upgrade cache
+schtasks /End /TN codex-autoresume    # stop the running daemon …
+timeout /t 3 /nobreak >nul
+schtasks /Run /TN codex-autoresume    # … and start the new code
+```
+
+Re-running `codex plugin add` upgrades in place — no `remove` needed.
+`codex plugin marketplace upgrade` only refreshes Git marketplaces; a local
+clone is read directly, so `git pull` is enough. The panel header shows the
+**running** daemon's version next to the title — if it still shows the old
+number after an update, the daemon has not been restarted.
 
 ### ⚙️ How it works
 
@@ -168,6 +201,9 @@ reasoning_effort = ""
 
 [control_api]
 port = 8765                 # the panel
+
+[update]
+enabled = true              # red-dot self-update in the panel
 ```
 
 ### ⌨️ CLI
@@ -219,7 +255,8 @@ ChatGPT 的额度限制（5 小时窗口 / 周额度）打断 Codex 任务时，
 - **goal 用官方方式继续。** 桌面应用占用会话时，通过 UI 自动化点击应用自己的 **Resume goal** 按钮（等价于你亲手点）；未占用时走官方 `thread/goal/set` 接口。**绝不**注入伪造的聊天消息。
 - **每次恢复可指定模型与推理强度。** 每个会话可固定自动恢复时的 model / reasoning，也可继承线程设置。
 - **周额度守护 + 重置卡。** 可选择让 goal 跨越周重置继续跑；周额度耗尽且账户有官方重置卡时可自动消耗（按会话开启）。
-- **值得打开的控制面板。** 深色 / 浅色双主题（跟随系统、记忆选择）、中英双语、双模拟时钟（本机 + 太平洋时间）、压力渐变的额度环、官方重置预告 / 实测到账 / 动态日志——挂在 `127.0.0.1:8765`，不消耗额度。
+- **值得打开的控制面板。** 深色 / 浅色双主题（跟随系统、记忆选择）、中英双语、双模拟时钟（本机 + 太平洋时间）、压力渐变的额度环、官方重置预告 / 实测到账 / 多源 Tibo 动态日志（重置追踪站 + 两个 X 镜像，每 2 分钟刷新）——挂在 `127.0.0.1:8765`，不消耗额度。
+- **面板里一键自更新。** 守护每天检查一次 GitHub 最新 release；有新版时 logo 右上角出现小红点——点开确认后自行更新并重启（源码检出走快进 `git pull`，pip 安装走 `pip install -U`），面板自动重连。
 - **私有且诚实。** 只读扫描 Codex 本地数据库 + 一次经系统代理的轻量用量轮询；无遥测、无账号、面板仅限本机。所有 ETA 均为实测——测不出来就显示 `--`，绝不编数字。
 
 ### 🚀 30 秒上手
@@ -260,6 +297,25 @@ codex plugin remove codex-autoresume-guard@codex-autoresume # 插件
 codex plugin marketplace remove codex-autoresume            # 市场
 ```
 
+升级已安装版本：
+
+面板每天检查一次 GitHub 最新 release。有新版时 Codex Guard logo 右上角出现小红点——点开确认后，守护自行更新并重启（源码检出走 `git pull --ff-only`，pip 安装走 `pip install -U`，源为 `[update] pip_source`），面板自动重连。自更新要求源码检出干净且有 upstream，或 pip 安装配置了 `pip_source`；可用 `[update] enabled = false` 关闭。
+
+手动升级（兜底）：
+
+```bash
+git pull --ff-only                    # 在克隆仓库 / 本地市场目录
+pip install -U .                      # 用提供 codex-autoresume 的同一个 Python
+codex plugin add codex-autoresume-guard@codex-autoresume   # 重新 add 即刷新插件缓存
+schtasks /End /TN codex-autoresume    # 停掉正在运行的守护 …
+timeout /t 3 /nobreak >nul
+schtasks /Run /TN codex-autoresume    # … 再启动新代码
+```
+
+重复 `codex plugin add` 会就地升级，无需先 `remove`。
+`codex plugin marketplace upgrade` 只刷新 Git 市场；本地克隆目录是直接读取的，`git pull` 就够了。
+面板标题旁显示的是**正在运行**的守护版本——更新后若还是旧号，说明守护没重启。
+
 ### ⚙️ 工作原理
 
 ```
@@ -296,6 +352,9 @@ reasoning_effort = ""
 
 [control_api]
 port = 8765                 # 面板端口
+
+[update]
+enabled = true              # 面板红点自更新
 ```
 
 ### ⌨️ 命令
