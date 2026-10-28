@@ -66,7 +66,9 @@ Codex Guard does that for you, and it does it the way you would:
   release once a day. When one exists, a small red dot appears on the
   logo — click it, confirm, and the guard updates itself and restarts
   (source checkout: fast-forward `git pull`; pip install: `pip install -U`),
-  reconnecting the panel when it is back.
+  reconnecting the panel when it is back. With no red dot, clicking the
+  logo checks GitHub again right away instead of waiting for the daily
+  check.
 - **Private and honest by design.** Reads Codex's local databases
   read-only, one lightweight usage HTTP poll through your system proxy,
   no telemetry, no accounts, localhost-only panel. Every ETA shown is
@@ -124,9 +126,10 @@ The panel checks GitHub for a newer release once a day. When one exists, a
 small red dot appears on the Codex Guard logo — click it, confirm, and the
 guard updates itself and restarts (source checkout: `git pull --ff-only`;
 pip install: `pip install -U` against `[update] pip_source`), and the panel
-reconnects automatically. Self-update needs a clean checkout with an
-upstream, or a pip install with a configured `pip_source`; disable it with
-`[update] enabled = false`.
+reconnects automatically. When no red dot is shown, clicking the logo runs
+a fresh check immediately, so you do not have to wait for the daily one.
+Self-update needs a clean checkout with an upstream, or a pip install with
+a configured `pip_source`; disable it with `[update] enabled = false`.
 
 Manual upgrade (fallback):
 
@@ -256,7 +259,7 @@ ChatGPT 的额度限制（5 小时窗口 / 周额度）打断 Codex 任务时，
 - **每次恢复可指定模型与推理强度。** 每个会话可固定自动恢复时的 model / reasoning，也可继承线程设置。
 - **周额度守护 + 重置卡。** 可选择让 goal 跨越周重置继续跑；周额度耗尽且账户有官方重置卡时可自动消耗（按会话开启）。
 - **值得打开的控制面板。** 深色 / 浅色双主题（跟随系统、记忆选择）、中英双语、双模拟时钟（本机 + 太平洋时间）、压力渐变的额度环、官方重置预告 / 实测到账 / 多源 Tibo 动态日志（重置追踪站 + 两个 X 镜像，每 2 分钟刷新）——挂在 `127.0.0.1:8765`，不消耗额度。
-- **面板里一键自更新。** 守护每天检查一次 GitHub 最新 release；有新版时 logo 右上角出现小红点——点开确认后自行更新并重启（源码检出走快进 `git pull`，pip 安装走 `pip install -U`），面板自动重连。
+- **面板里一键自更新。** 守护每天检查一次 GitHub 最新 release；有新版时 logo 右上角出现小红点——点开确认后自行更新并重启（源码检出走快进 `git pull`，pip 安装走 `pip install -U`），面板自动重连。没有红点时点击 logo 会立即重新检查，不必等每日检查。
 - **私有且诚实。** 只读扫描 Codex 本地数据库 + 一次经系统代理的轻量用量轮询；无遥测、无账号、面板仅限本机。所有 ETA 均为实测——测不出来就显示 `--`，绝不编数字。
 
 ### 🚀 30 秒上手
@@ -299,7 +302,7 @@ codex plugin marketplace remove codex-autoresume            # 市场
 
 升级已安装版本：
 
-面板每天检查一次 GitHub 最新 release。有新版时 Codex Guard logo 右上角出现小红点——点开确认后，守护自行更新并重启（源码检出走 `git pull --ff-only`，pip 安装走 `pip install -U`，源为 `[update] pip_source`），面板自动重连。自更新要求源码检出干净且有 upstream，或 pip 安装配置了 `pip_source`；可用 `[update] enabled = false` 关闭。
+面板每天检查一次 GitHub 最新 release。有新版时 Codex Guard logo 右上角出现小红点——点开确认后，守护自行更新并重启（源码检出走 `git pull --ff-only`，pip 安装走 `pip install -U`，源为 `[update] pip_source`），面板自动重连。没有红点时点击 logo 会立即重新检查一次，不必等每日检查。自更新要求源码检出干净且有 upstream，或 pip 安装配置了 `pip_source`；可用 `[update] enabled = false` 关闭。
 
 手动升级（兜底）：
 

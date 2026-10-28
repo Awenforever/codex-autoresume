@@ -464,7 +464,7 @@ class PanelUpdateUiTest(unittest.TestCase):
         from codex_autoresume.control import PANEL_HTML
         self.assertIn('id="logoWrap"', PANEL_HTML)
         self.assertIn('id="logoBtn"', PANEL_HTML)
-        self.assertIn('onclick="openUpdate()"', PANEL_HTML)
+        self.assertIn('onclick="onLogo()"', PANEL_HTML)
         self.assertIn('id="updDot"', PANEL_HTML)
         self.assertIn('<div id="updOverlay"', PANEL_HTML)
         self.assertIn('id="updGo"', PANEL_HTML)
@@ -476,8 +476,77 @@ class PanelUpdateUiTest(unittest.TestCase):
         self.assertIn('api("/api/update",{confirm:true})', PANEL_HTML)
         self.assertIn("syncUpdateUi(s)", PANEL_HTML)
 
+    def test_idle_logo_click_runs_a_forced_check(self):
+        from codex_autoresume.control import PANEL_HTML
+        self.assertIn('api("/api/update/check",{},15000)', PANEL_HTML)
+
     def test_update_strings_are_bilingual(self):
         from codex_autoresume.control import PANEL_HTML
         for key in ("updTitle", "updNote", "updGo", "updRestarting",
-                    "updFailed", "updSlow"):
+                    "updFailed", "updSlow", "logoTip", "updChecking",
+                    "updCurrent", "updFound", "updCheckFail", "updOff"):
             self.assertEqual(PANEL_HTML.count(key + ':'), 2, key)
+
+
+class PanelUpdateCheckTest(unittest.TestCase):
+    """Logo click: red dot opens the modal, otherwise force a fresh check."""
+
+    def test_logo_click_paths(self):
+        if not shutil.which("node"):
+            self.skipTest("node not installed")
+        js = _panel_js()
+        harness = _fn(js, "onLogo") + r"""
+var calls=[];
+var mode="update";
+function L(k){return k+":"}
+function toast(m,ms){calls.push(["toast",m])}
+function openUpdate(){calls.push(["open"])}
+function syncUpdateUi(s){calls.push(["sync",s.update.latest])}
+function api(p,o,ms){
+ calls.push(["api",p,ms]);
+ var u={enabled:true,current:"0.3.53",latest:"0.3.54",available:true,
+  can_update:true,in_progress:false,error:"",reason:""};
+ if(mode==="current"){u.latest="0.3.53";u.available=false;u.can_update=false}
+ if(mode==="error"){u.latest=null;u.available=false;u.can_update=false;
+  u.error="offline"}
+ return Promise.resolve({update:u})
+}
+var window={__s:{update:{enabled:true,available:false,can_update:false,
+ in_progress:false}}};
+function reset(){calls=[];
+ window.__s.update={enabled:true,available:false,can_update:false,
+  in_progress:false}}
+onLogo();
+setTimeout(function(){
+ var found=calls.slice();
+ reset();mode="current";onLogo();
+ setTimeout(function(){
+  var current=calls.slice();
+  reset();mode="error";onLogo();
+  setTimeout(function(){
+   var failed=calls.slice();
+   reset();
+   window.__s.update={enabled:true,available:true,can_update:true,
+    in_progress:false,latest:"9.9.9"};
+   onLogo();
+   console.log(JSON.stringify({found:found,current:current,
+    failed:failed,reddot:calls.slice()}));
+  },10);
+ },10);
+},10);
+"""
+        got = _run_node(harness)
+        found = got["found"]
+        self.assertIn(["api", "/api/update/check", 15000], found)
+        self.assertTrue(any(c[0] == "toast" and c[1].startswith("updChecking:")
+                            for c in found))
+        self.assertIn(["sync", "0.3.54"], found)
+        self.assertIn(["open"], found)
+        current = got["current"]
+        self.assertIn(["toast", "updCurrent:0.3.53"], current)
+        self.assertNotIn(["open"], current)
+        failed = got["failed"]
+        self.assertIn(["toast", "updCheckFail:offline"], failed)
+        self.assertNotIn(["open"], failed)
+        # with a red dot the logo opens the modal without touching the network
+        self.assertEqual(got["reddot"], [["open"]])

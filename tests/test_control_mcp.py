@@ -27,6 +27,11 @@ class _StubDaemon:
         self._snapshot = None
         self._state_mtime = 0.0
         self._threads_meta = threads   # id -> dict(title=, updated_ms=)
+        self.update_checks = []
+        self.started_updates = 0
+        self._upd = {"enabled": True, "current": "test", "latest": None,
+                     "available": False, "can_update": False, "reason": "",
+                     "error": "", "last": None}
 
     def _effective_thread_config(self, thread_id, t):
         tc = {"weekly_resume": False, "model": None, "reasoning_effort": None}
@@ -55,11 +60,19 @@ class _StubDaemon:
         return self.announcement()
 
     def cached_update(self):
-        return {"enabled": True, "current": "test", "latest": None,
-                "available": False, "can_update": False, "reason": "",
-                "in_progress": False, "last": None}
+        out = dict(self._upd)
+        out["in_progress"] = False
+        return out
+
+    def update_info(self, force=False):
+        self.update_checks.append(bool(force))
+        self._upd = {"enabled": True, "current": "test", "latest": "9.9.9",
+                     "available": True, "can_update": True, "reason": "",
+                     "error": "", "checked_at": "now"}
+        return self.cached_update()
 
     def begin_update(self):
+        self.started_updates += 1
         return {"started": True, "from": "test", "to": "9.9.9"}
 
 
@@ -117,6 +130,14 @@ class TestControlApi(unittest.TestCase):
         out = self._post("/api/update", {"confirm": True})
         self.assertTrue(out["started"])
         self.assertEqual(out["to"], "9.9.9")
+
+    def test_update_check_forces_a_fresh_lookup_only(self):
+        # clicking the logo when no red dot is shown: fresh check, no update
+        out = self._post("/api/update/check", {})
+        self.assertEqual(self.daemon.update_checks, [True])
+        self.assertEqual(self.daemon.started_updates, 0)
+        self.assertTrue(out["update"]["available"])
+        self.assertEqual(out["update"]["latest"], "9.9.9")
 
     def test_stats_reset_requires_confirmation(self):
         req = urllib.request.Request(

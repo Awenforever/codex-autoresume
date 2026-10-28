@@ -310,6 +310,24 @@ class DaemonUpdateTest(unittest.TestCase):
             again = d.update_info()
         self.assertEqual(again["error"], info["error"])
 
+    def test_force_bypasses_the_check_interval(self):
+        from codex_autoresume import __version__ as current
+        d = self._daemon()
+        d._update = {"enabled": True, "current": current, "latest": None,
+                     "available": False, "can_update": False,
+                     "reason": "", "error": ""}
+        d._update_at = time.monotonic()      # cached seconds ago
+        rel = {"version": current, "tag": "v" + current, "url": "",
+               "published_at": ""}
+        with mock.patch.object(updater, "fetch_latest_release",
+                               return_value=rel) as fetch:
+            d.update_info()
+        fetch.assert_not_called()
+        with mock.patch.object(updater, "fetch_latest_release",
+                               return_value=rel) as fetch:
+            d.update_info(force=True)
+        fetch.assert_called_once()
+
     def test_begin_update_refuses_when_current(self):
         d = self._daemon()
         d._update = {"enabled": True, "current": "0.3.49",

@@ -235,7 +235,7 @@ pointer-events:none;box-shadow:0 6px 24px var(--shadow)}
 .controls,.controls2{gap:10px}input[type=text]{width:118px}}
 </style></head><body>
 <header>
- <div class="logowrap" id="logoWrap"><button class="logo" id="logoBtn" onclick="openUpdate()" aria-label="Codex Guard"><svg viewBox="0 0 24 24" fill="none">
+ <div class="logowrap" id="logoWrap"><button class="logo" id="logoBtn" onclick="onLogo()" aria-label="Codex Guard"><svg viewBox="0 0 24 24" fill="none">
  <path d="M12 3.4 19.4 7.7v8.6L12 20.6 4.6 16.3V7.7Z" stroke="#fff" stroke-width="2"
  stroke-linejoin="round"/><path d="M9.8 8.4 15.8 12 9.8 15.6Z" fill="#fff"/></svg></button><span class="upddot" id="updDot"></span></div>
  <div><div class="hrow"><h1 data-i18n="title">Codex Guard</h1><span class="ver">v__CXR_VERSION__</span></div><div class="sub" data-i18n="sub">Auto-continue conversations after quota resets</div></div>
@@ -316,6 +316,7 @@ errConn:"无法连接守护进程：",errTimeout:"请求超时（8 秒无响应�
 errHint:"。面板每 15 秒自动重试；若持续失败，请确认守护进程在运行：",
 upd:"已更新",restored:"已恢复默认指令",pauseOK:"守护已暂停",resumeOK:"守护已恢复",
 updTitle:"发现新版本",updTip:"可升级到 v",updNote:"守护进程会自动更新代码并重启；正在进行的对话和额度不受影响。面板会自动重新连接。",updCancel:"稍后",updGo:"更新并重启",updStarting:"正在准备升级…",updRestarting:"正在升级并重启守护进程，面板会自动重新连接…",updFailed:"升级未能启动：",updLastFail:"上次升级未完成：",updSlow:"升级耗时较长——请查看 update.log，或手动重启守护进程。",
+logoTip:"检查更新",updChecking:"正在检查更新…",updCurrent:"已是最新版本 v",updFound:"发现新版本 v",updCheckFail:"检查更新失败：",updOff:"更新检查已关闭",
 footer:"打开方式：侧栏输入 <code>http://127.0.0.1:8765</code>（推荐，不消耗额度）· 桌面快捷方式 · 完整说明见插件 README"},
 en:{title:"Codex Guard",sub:"Auto-continue conversations after quota resets",
 langTip:"Language: English (click to switch)",loading:"Loading…",theme:"Theme",themeAuto:"Follow system",themeLight:"Light",themeDark:"Dark",w5:"5h window",wk:"Weekly",reset:"Resets",
@@ -344,6 +345,7 @@ errHint:". The panel retries every 15s; if this persists, start the daemon: ",
 upd:"Saved",restored:"Prompt reset to default",pauseOK:"Paused all",
 resumeOK:"Resumed all",
 updTitle:"Update available",updTip:"Update available: v",updNote:"The guard will update its code and restart. Conversations and quota are unaffected; this panel reconnects automatically.",updCancel:"Later",updGo:"Update & restart",updStarting:"Preparing update…",updRestarting:"Updating and restarting the guard; this panel reconnects automatically…",updFailed:"Update could not start: ",updLastFail:"Last update did not finish: ",updSlow:"This is taking longer than usual — check update.log or restart the daemon manually.",
+logoTip:"Check for updates",updChecking:"Checking for updates…",updCurrent:"Up to date: v",updFound:"New version available: v",updCheckFail:"Update check failed: ",updOff:"Update checks are disabled",
 footer:"Open: type <code>http://127.0.0.1:8765</code> in the sidebar (recommended, no quota cost) · desktop shortcut · full docs in the plugin README"}};
 function L(k){var d=I18N[LNG]||I18N.zh;var v=d[k];
 return (v===undefined)?(I18N.zh[k]||k):v}
@@ -391,11 +393,12 @@ function etaRow(label,q,etaK,rateK,exhK,capK){
 
  return '<div class="kv"><span>'+label+"</span><span>"+b+tail+"</span></div>"}
 function kvRow(k,v){return '<div class="kv"><span>'+k+"</span><span>"+v+"</span></div>"}
-function toast(m){var t=document.getElementById("toast");t.textContent=m;
-t.classList.add("show");setTimeout(function(){t.classList.remove("show")},1500)}
-function api(p,o){var init=o?{method:"POST",headers:{"Content-Type":"application/json"},
+function toast(m,ms){var t=document.getElementById("toast");t.textContent=m;
+t.classList.add("show");clearTimeout(toast._t);
+toast._t=setTimeout(function(){t.classList.remove("show")},ms||1500)}
+function api(p,o,ms){var init=o?{method:"POST",headers:{"Content-Type":"application/json"},
 body:JSON.stringify(o)}:undefined;
-var tp=new Promise(function(_,rej){setTimeout(function(){rej(new Error("timeout"))},8000)});
+var tp=new Promise(function(_,rej){setTimeout(function(){rej(new Error("timeout"))},ms||8000)});
 return Promise.race([fetch(p,init).then(function(r){return r.json()}),tp])}
 function modelOpts(cur){var o="";var ms=(window.__s&&window.__s.models)||[];
 for(var k=0;k<ms.length;k++){o+='<option '+((cur||"")===ms[k].id?"selected":"")+' value="'+esc(ms[k].id)+'">'+esc(ms[k].name)+"</option>"}
@@ -509,13 +512,38 @@ function syncUpdateUi(s){
  var b=document.getElementById("logoBtn");
  var show=!!(u&&u.available&&u.can_update&&!u.in_progress);
  if(wrap){wrap.classList.toggle("upd",show)}
- if(b){b.title=show?(L("updTip")+u.latest):""}
+ if(b){b.title=show?(L("updTip")+u.latest):L("logoTip")}
  if(!window.__updating)return;
  var last=u&&u.last;
  if(u&&!u.in_progress&&(!u.available||
    (last&&last.at&&last.at!==window.__updBase))){location.reload();return}
  var note=document.getElementById("updNote");
  if(note){note.textContent=L("updRestarting")}
+}
+function onLogo(){
+ var u=(window.__s&&window.__s.update)||null;
+ if(u&&u.available&&u.can_update&&!u.in_progress){openUpdate();return}
+ if(window.__updating||window.__checking){return}
+ if(u&&u.enabled===false){toast(L("updOff"));return}
+ window.__checking=true;
+ toast(L("updChecking"),12000);
+ api("/api/update/check",{},15000).then(function(r){
+  window.__checking=false;
+  var nu=(r&&r.update)||null;
+  if(!nu){toast(L("updCheckFail")+((r&&r.error)||L("errFail")));return}
+  // the forced check updated the daemon cache: reflect it immediately
+  if(!window.__s){window.__s={}}
+  window.__s.update=nu;
+  syncUpdateUi(window.__s);
+  if(nu.available&&nu.can_update&&!nu.in_progress){openUpdate();return}
+  if(nu.available){toast(L("updFound")+nu.latest+
+   (nu.reason?(" · "+nu.reason):""));return}
+  if(nu.error){toast(L("updCheckFail")+String(nu.error).slice(0,160));return}
+  if(nu.enabled===false){toast(L("updOff"));return}
+  toast(L("updCurrent")+(nu.current||""))
+ }).catch(function(e){
+  window.__checking=false;
+  toast(L("updCheckFail")+((e&&e.message)||L("errFail")))})
 }
 function openUpdate(){
  var u=(window.__s&&window.__s.update)||null;
@@ -830,6 +858,9 @@ class ControlApi:
                         return
                     self._json(api.start_update())
                     return
+                if self.path == "/api/update/check":
+                    self._json(api.check_update())
+                    return
                 if self.path == "/api/stats/reset":
                     if payload.get("confirm") is not True:
                         self._json({"error": "confirmation required"}, 400)
@@ -1009,6 +1040,17 @@ class ControlApi:
             return fn()
         except Exception as e:     # never let the panel see a stack trace
             return {"started": False, "error": str(e)[:300]}
+
+    def check_update(self) -> dict:
+        """Force a fresh release check; this never starts the updater."""
+        fn = getattr(self.daemon, "update_info", None)
+        if fn is None:
+            return {"update": None, "error": "update is not supported"}
+        try:
+            fn(force=True)
+        except Exception as e:
+            return {"update": None, "error": str(e)[:300]}
+        return {"update": self.daemon.cached_update()}
 
     def reset_stats(self) -> dict:
         """Zero the displayed resumed/attempts counters.
