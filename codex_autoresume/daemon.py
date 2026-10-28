@@ -1016,9 +1016,11 @@ class Daemon:
             if cur_s is not None:
                 st.prev_secondary_pct = cur_s
                 if cur_s >= 100:
-                    # first observation of a full weekly window: remember
-                    # when it actually ran dry, never the reset timestamp
-                    if not st.secondary_exhausted_at:
+                    # only a climb we actually saw says when it ran dry; a
+                    # daemon that starts (or upgrades) while already
+                    # exhausted has no timestamp and must not claim "now"
+                    if (prev_s is not None and prev_s < 100
+                            and not st.secondary_exhausted_at):
                         st.secondary_exhausted_at = now_iso
                         exhausted_changed = True
                 elif st.secondary_exhausted_at:
