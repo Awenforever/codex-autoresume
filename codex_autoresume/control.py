@@ -146,7 +146,7 @@ padding:0 6px;margin-right:10px}
 .hl-reset .rl:nth-child(5n){color:var(--reset)}
 .chip{white-space:nowrap}
 .kv .ok{color:var(--accent)} .kv .bad{color:var(--danger)} .kv .eta{color:var(--warn)}
-.kv .ok,.kv .eta{transition:opacity .4s ease,filter .4s ease}
+.kv .ok,.kv .eta{transition:color .4s ease}
 button{background:var(--card2);border:1px solid var(--line);color:var(--fg);
 border-radius:10px;padding:7px 16px;font-size:13px;cursor:pointer;
 transition:border-color .15s,transform .1s}
@@ -426,9 +426,12 @@ function hlNews(t){
   return w+"</span>"}
  return '<span class="'+cls+'">'+m+"</span>"})}
 function stripTco(t){
-// X wraps media/external links in t.co shortlinks. Strip at render time too:
-// news_log persisted by older builds can still carry them.
-return String(t||"").replace(/https?:\/\/t\.co\/\S+/gi,"").replace(/\s+/g," ").trim()}
+// X appends a t.co card to the end of media/external posts; that trailing
+// link is noise. A link elsewhere is content (often the subject, e.g.
+// "<card> has landed") and stays. Render-time too: news_log persisted by
+// older builds can still carry trailing links.
+return String(t||"").replace(/(?:\s*https?:\/\/t\.co\/\S+)+\s*$/i,"")
+.replace(/\s+/g," ").trim()}
 function newsBox(s){
  var ann=s.announcement||null;
  var es=(s.news_log&&s.news_log.length)?s.news_log:
@@ -454,17 +457,31 @@ function fmtPostAt(iso){
  if(r.indexOf("undefined")<0){return r}
  }catch(e){}
  return fmtISO(iso)}
+function hexRGB(v){
+ var m=/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(v||"").trim());
+ if(!m){return null}
+ var h=m[1];
+ if(h.length===3){h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2]}
+ return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),
+ parseInt(h.slice(4,6),16)]}
+function cssRGB(name){
+ try{return hexRGB(getComputedStyle(document.documentElement)
+ .getPropertyValue(name))}catch(e){return null}}
+function mixRGB(a,b,f){
+ return "rgb("+Math.round(a[0]+(b[0]-a[0])*f)+","+
+ Math.round(a[1]+(b[1]-a[1])*f)+","+
+ Math.round(a[2]+(b[2]-a[2])*f)+")"}
 function freshStyle(epochSec,mode){
- // freshness: vivid near "now", faded when far away. Forecast decays with
- // absolute distance (an overdue forecast is stale too); landed decays
- // with age. Opacity + saturation keep both themes readable.
+ // freshness is conveyed by COLOR alone at full opacity: the row's hue at
+ // "now" slides to muted gray at a 24h horizon. Forecast decays in both
+ // directions (an overdue forecast is stale too); landed decays with age.
  if(epochSec===null||epochSec===undefined||!isFinite(epochSec)){return ""}
- var now=Date.now()/1000;
- var horizon=(mode==="forecast")?96*3600:168*3600;
+ var now=Date.now()/1000,horizon=24*3600;
  var dist=(mode==="forecast")?Math.abs(epochSec-now):Math.max(0,now-epochSec);
  var f=1-Math.min(1,Math.max(0,dist/horizon));
- var op=(0.34+0.66*f).toFixed(2),sat=(0.18+0.82*f).toFixed(2);
- return ' style="opacity:'+op+';filter:saturate('+sat+')"'}
+ var base=cssRGB(mode==="forecast"?"--warn":"--accent"),gray=cssRGB("--dim");
+ if(!base||!gray){return ""}
+ return ' style="color:'+mixRGB(base,gray,1-f)+'"'}
 function annRowsFor(s){
  var ann=s.announcement||null,rows="";
  var fct="--",fst="";

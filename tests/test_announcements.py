@@ -238,18 +238,21 @@ class MergeTest(unittest.TestCase):
         merged = mod._merge_posts([b], [a])
         self.assertEqual(merged[0]["source"], "codex-reset")
 
-    def test_tco_shortlinks_are_stripped(self):
-        # X wraps media/external links in t.co; the panel must not show
-        # opaque shortlinks (they often point at deleted cards).
+    def test_only_trailing_tco_shortlinks_are_stripped(self):
+        # X appends a t.co card at the end of a post; that trailing link is
+        # dropped. A link in subject position is content and stays.
         a = {"id": "1", "at": "2026-10-26T05:21:22Z",
              "text": "https://t.co/Fgy0dBAHsJ has landed",
              "source": "willreset"}
         b = {"id": "2", "at": "2026-10-26T06:21:22Z",
-             "text": "Terra is back https://t.co/1ilnCkAPuy",
+             "text": "Terra is back now https://t.co/1ilnCkAPuy",
              "source": "codex-reset"}
-        merged = mod._merge_posts([a, b])
+        c = {"id": "3", "at": "2026-10-26T07:21:22Z",
+             "text": "https://t.co/onlycard", "source": "willreset"}
+        merged = mod._merge_posts([a, b, c])
         self.assertEqual([p["text"] for p in merged],
-                         ["has landed", "Terra is back"])
+                         ["https://t.co/Fgy0dBAHsJ has landed",
+                          "Terra is back now"])
 
     def test_cap_keeps_newest_80(self):
         posts = [{"id": str(i), "at": "2026-10-26T%02d:%02d:00Z"

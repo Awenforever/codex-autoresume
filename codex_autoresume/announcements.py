@@ -42,9 +42,11 @@ _LANDING_RE = re.compile(
     r"Landing\s+(?:tomorrow|today|next\s+[a-z]+)?\s*"
     r"(?:before|at|around|by)\s*[^<>()!?.]{3,60}", re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
-# X wraps external/media links in t.co shorteners. They carry no readable
-# information in the panel and often point at deleted/expired cards.
-_TCO_RE = re.compile(r"https?://t\.co/\S+", re.IGNORECASE)
+# X appends a t.co shortlink to the end of posts that carry media or an
+# external card. Those trailing links are noise in the panel. A link
+# elsewhere in the sentence is content — often the subject itself
+# ("<card> has landed") — so only the trailing ones are dropped.
+_TCO_TAIL_RE = re.compile(r"(?:\s*https?://t\.co/\S+)+\s*$", re.IGNORECASE)
 _UTC_CLOCK = re.compile(r"(\d{1,2}):(\d{2})\s*UTC")
 _PACIFIC_CLOCK = re.compile(
     r"((?:tomorrow|today)[^0-9]{0,12})?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*"
@@ -474,6 +476,10 @@ def _richer(a: dict, b: dict) -> dict:
     return a if la >= lb else b
 
 
+def _strip_tco(text: str) -> str:
+    return _TCO_TAIL_RE.sub("", str(text or ""))
+
+
 def _merge_posts(*groups) -> list[dict]:
     """Merge source timelines, dedupe by X id/text, oldest -> newest."""
     by_id: dict[str, dict] = {}
@@ -481,7 +487,7 @@ def _merge_posts(*groups) -> list[dict]:
     for posts in groups:
         for p in posts or []:
             at = _norm_iso(p.get("at"))
-            text = _clean(_TCO_RE.sub("", p.get("text") or ""))
+            text = _clean(_strip_tco(p.get("text") or ""))
             if not at or not text:
                 continue
             rec = dict(p, at=at, text=text)

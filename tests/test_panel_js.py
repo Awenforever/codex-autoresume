@@ -235,14 +235,19 @@ console.log(JSON.stringify([capped,plain,dry,dry0]));
 
 
 class PanelLandedTest(unittest.TestCase):
-    """Landed is a full reset: no weekly label, and it fades with age."""
+    """Landed is a full reset: no weekly label, and it grays with age."""
 
     def test_landed_has_no_weekly_label(self):
         if not shutil.which("node"):
             self.skipTest("node not installed")
         js = _panel_js()
-        harness = "\n".join([_fn(js, "freshStyle"),
+        harness = "\n".join([_fn(js, "hexRGB"), _fn(js, "cssRGB"),
+                             _fn(js, "mixRGB"), _fn(js, "freshStyle"),
                              _fn(js, "annRowsFor")]) + r"""
+var document={documentElement:{}};
+function getComputedStyle(){return{getPropertyValue:function(n){
+ return {"--warn":"#e0a341","--accent":"#10a37f",
+         "--dim":"#87929a"}[n]||""}}}
 var I18N={en:{forecast:"Forecast",landed:"Landed",card:"Credits",wk:"Weekly"}};
 function L(k){return I18N.en[k]||k}
 function kvRow(k,v){return k+"="+v+"\n"}
@@ -267,31 +272,52 @@ console.log(JSON.stringify([annRowsFor(weeklyOnly),annRowsFor(creditNew)]));
 
 
 class PanelFreshnessTest(unittest.TestCase):
-    """Forecast/landed text is vivid near now and fades when far away."""
+    """Freshness is a color shift toward gray within a 24h horizon."""
 
     def test_style_decays_with_distance(self):
         if not shutil.which("node"):
             self.skipTest("node not installed")
         js = _panel_js()
-        harness = _fn(js, "freshStyle") + r"""
+        harness = "\n".join([_fn(js, "hexRGB"), _fn(js, "cssRGB"),
+                             _fn(js, "mixRGB"),
+                             _fn(js, "freshStyle")]) + r"""
+var STYLES={"--warn":"#e0a341","--accent":"#10a37f","--dim":"#87929a"};
+var document={documentElement:{}};
+function getComputedStyle(){return{getPropertyValue:function(n){return STYLES[n]||""}}}
 var now=Date.now()/1000;
-function op(s){var m=/opacity:([0-9.]+)/.exec(s);return m?parseFloat(m[1]):null}
+function rgb(s){var m=/color:rgb\((\d+),(\d+),(\d+)\)/.exec(s);
+ return m?[+m[1],+m[2],+m[3]]:null}
 console.log(JSON.stringify({
-  nearF:op(freshStyle(now,"forecast")),
-  farF:op(freshStyle(now-96*3600,"forecast")),
-  staleF:op(freshStyle(now-200*3600,"forecast")),
-  nearL:op(freshStyle(now-60,"landed")),
-  oldL:op(freshStyle(now-168*3600,"landed")),
-  none:freshStyle(null,"landed")
+  nearF:rgb(freshStyle(now,"forecast")),
+  halfF:rgb(freshStyle(now+12*3600,"forecast")),
+  farF:rgb(freshStyle(now+24*3600,"forecast")),
+  staleF:rgb(freshStyle(now-48*3600,"forecast")),
+  nearL:rgb(freshStyle(now-60,"landed")),
+  halfL:rgb(freshStyle(now-12*3600,"landed")),
+  oldL:rgb(freshStyle(now-24*3600,"landed")),
+  none:freshStyle(null,"landed"),
+  rawF:freshStyle(now,"forecast")
 }));
 """
         got = _run_node(harness)
-        self.assertGreaterEqual(got["nearF"], 0.95)
-        self.assertLessEqual(got["farF"], 0.4)
-        self.assertLessEqual(got["staleF"], 0.4)
-        self.assertGreaterEqual(got["nearL"], 0.95)
-        self.assertLessEqual(got["oldL"], 0.4)
+        warn, accent, gray = [224, 163, 65], [16, 163, 127], [135, 146, 154]
+        self.assertEqual(got["nearF"], warn)
+        self.assertEqual(got["farF"], gray)
+        self.assertEqual(got["staleF"], gray)
+        self.assertEqual(got["nearL"], accent)
+        self.assertEqual(got["oldL"], gray)
+        for mid, hi, lo in ((got["halfF"], warn, gray),
+                            (got["halfL"], accent, gray)):
+            self.assertNotEqual(mid, hi)
+            self.assertNotEqual(mid, lo)
+            for c, a, b in zip(mid, hi, lo):
+                self.assertGreaterEqual(c, min(a, b))
+                self.assertLessEqual(c, max(a, b))
         self.assertEqual(got["none"], "")
+        # color only: no opacity fade, no filter
+        self.assertIn("color:rgb(", got["rawF"])
+        self.assertNotIn("opacity", got["rawF"])
+        self.assertNotIn("filter", got["rawF"])
 
 
 class PanelVersionTest(unittest.TestCase):
@@ -375,7 +401,8 @@ class PanelEscapingTest(unittest.TestCase):
 const out = {
   esc: esc("<img src=x onerror='alert(1)'>&\""),
   news: hlNews(esc("<img src=x onerror=alert(1)> reset at 15:00")),
-  tco: stripTco("Terra is back https://t.co/1ilnCkAPuy now"),
+  tco: stripTco("Terra is back now https://t.co/1ilnCkAPuy"),
+  tcoLead: stripTco("https://t.co/Fgy0dBAHsJ has landed"),
   jsq: jsq("a'b\\c<d\"e&f")
 };
 console.log(JSON.stringify(out));
@@ -399,6 +426,8 @@ console.log(JSON.stringify(out));
         self.assertIn("&lt;img", got["news"])
         self.assertIn("hl-reset", got["news"])
         self.assertEqual(got["tco"], "Terra is back now")
+        self.assertEqual(got["tcoLead"],
+                         "https://t.co/Fgy0dBAHsJ has landed")
         self.assertEqual(got["jsq"], "a\\&#39;b\\\\c&lt;d&quot;e&amp;f")
 
 
