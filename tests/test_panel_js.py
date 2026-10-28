@@ -34,6 +34,37 @@ class PanelJsSyntaxTest(unittest.TestCase):
             os.unlink(path)
 
 
+class PanelToastContrastTest(unittest.TestCase):
+    """The 13px toast must stay readable in both themes (WCAG AA)."""
+
+    @staticmethod
+    def _block(css, selector):
+        m = re.search(re.escape(selector) + r"\{([^}]*)\}", css, re.S)
+        return dict(re.findall(r"(--[\w-]+):(#[0-9a-fA-F]{6})", m.group(1)))
+
+    @staticmethod
+    def _lum(color):
+        rgb = [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        rgb = [c / 12.92 if c <= 0.04045
+               else ((c + 0.055) / 1.055) ** 2.4 for c in rgb]
+        return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+
+    def test_toast_text_contrast(self):
+        from codex_autoresume.control import PANEL_HTML
+        css = re.search(r"<style>(.*?)</style>", PANEL_HTML, re.S).group(1)
+        toast = re.search(r"#toast\{([^}]*)\}", css, re.S).group(1)
+        self.assertIn("color:var(--toast-fg)", toast)
+        for name, selector in (("dark", ":root"), ("light", "body.light")):
+            palette = self._block(css, selector)
+            fg, bg = palette["--toast-fg"], palette["--accent-soft"]
+            l1, l2 = self._lum(fg), self._lum(bg)
+            ratio = (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
+            self.assertGreaterEqual(
+                ratio, 4.5,
+                "%s toast contrast %.2f < 4.5 (%s on %s)"
+                % (name, ratio, fg, bg))
+
+
 class PanelNewsHighlightTest(unittest.TestCase):
     """The news lexicon must give "reset" per-letter color spans."""
 

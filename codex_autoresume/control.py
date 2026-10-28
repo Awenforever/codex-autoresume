@@ -30,7 +30,7 @@ PANEL_HTML = r"""<!doctype html>
 <title>Codex Guard Console</title>
 <style>
 :root{--bg:#0a0c0d;--card:#131719;--card2:#181d20;--line:#242b30;--fg:#ecefef;
---dim:#87929a;--accent:#10a37f;--accent-soft:#12362c;--warn:#e0a341;--danger:#e5534b;
+--dim:#87929a;--accent:#10a37f;--accent-soft:#12362c;--toast-fg:#24b189;--warn:#e0a341;--danger:#e5534b;
 --track:#1e2529;--hand:#ecefef;--hand2:#c8d2d8;--chipbg:#12202b;--chipbd:#1e3a4d;
 --warnbg:#3a3320;--link:#7ec8ff;--tickmaj:#39424a;--tickmin:#242b30;
 --hovbd:#31403a;--tipbg:#20272c;--tipfg:#dfe6ea;--swbg:#2c343a;--swknob:#aab4bb;
@@ -38,7 +38,7 @@ PANEL_HTML = r"""<!doctype html>
 --reset:#c9a6ff;
 color-scheme:dark}
 body.light{--bg:#f5f7f7;--card:#ffffff;--card2:#eef2f2;--line:#dfe6e8;--fg:#1b272c;
---dim:#64737a;--accent:#0d8a6a;--accent-soft:#e0f2ec;--warn:#a9741f;--danger:#cf443c;
+--dim:#64737a;--accent:#0d8a6a;--accent-soft:#e0f2ec;--toast-fg:#0a7358;--warn:#a9741f;--danger:#cf443c;
 --track:#e4ebeb;--hand:#202b31;--hand2:#5d6b72;--chipbg:#e9f3f0;--chipbd:#cfe4dc;
 --warnbg:#f6ecd4;--link:#17749f;--tickmaj:#9fadb2;--tickmin:#d3dcde;
 --hovbd:#c9d8d2;--tipbg:#ffffff;--tipfg:#26343b;--swbg:#c6d2d6;--swknob:#ffffff;
@@ -227,7 +227,7 @@ border-top:1px dashed var(--line);margin-top:10px;flex-wrap:wrap}
 .foot{color:var(--dim);font-size:11px;text-align:center;margin-top:14px;line-height:1.7}
 .foot code{color:var(--dim);background:none;padding:0}
 #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);
-background:var(--accent-soft);color:var(--accent);border:1px solid rgba(var(--accent-rgb),.5);
+background:var(--accent-soft);color:var(--toast-fg);border:1px solid rgba(var(--accent-rgb),.5);
 padding:8px 18px;border-radius:11px;font-size:13px;opacity:0;transition:.25s;
 pointer-events:none;box-shadow:0 6px 24px var(--shadow)}
 #toast.show{opacity:1}
