@@ -87,6 +87,12 @@ class WatcherState:
     # blind the rollover detector to a reset that happened across it
     prev_primary_pct: int | None = None
     prev_secondary_pct: int | None = None
+    # first observation of the weekly window at 100% (actual exhaustion,
+    # not the reset timestamp); cleared when the weekly window rolls over
+    secondary_exhausted_at: str | None = None
+    # set when the operator deliberately zeroed the resume counters; blocks
+    # load_state from re-deriving successes from the retained history
+    stats_reset_at: str | None = None
     # last valid weekly-exhaustion ETA: frozen on the panel while the 5h
     # block is exhausted (nothing burns, so t is unmeasurable) and the
     # weekly quota is not itself exhausted
@@ -136,10 +142,11 @@ def load_state(state_path: str) -> WatcherState:
                 raw = json.load(f)
             if raw.get("version", STATE_VERSION) != STATE_VERSION:
                 raise StateError("state version mismatch: %r" % raw.get("version"))
+            stats_reset_at = raw.get("stats_reset_at")
             for tid, t in raw.get("threads", {}).items():
                 ts = ThreadState(**{k: v for k, v in t.items()
                                     if k in ThreadState.__dataclass_fields__})
-                if not ts.success_resumes:
+                if not ts.success_resumes and not stats_reset_at:
                     # migrate older state (no counter yet): derive successes
                     # from the recorded history
                     ts.success_resumes = sum(
@@ -155,6 +162,8 @@ def load_state(state_path: str) -> WatcherState:
             st.news_log = list(raw.get("news_log", []))[-200:]
             st.prev_primary_pct = raw.get("prev_primary_pct")
             st.prev_secondary_pct = raw.get("prev_secondary_pct")
+            st.secondary_exhausted_at = raw.get("secondary_exhausted_at")
+            st.stats_reset_at = stats_reset_at
             st.last_weekly_eta = raw.get("last_weekly_eta")
             st.weekly_ratio_plan = raw.get("weekly_ratio_plan")
             st.weekly_ratio_windows = list(
@@ -198,6 +207,8 @@ def _save_state_locked(st: WatcherState) -> None:
         "news_log": st.news_log,
         "prev_primary_pct": st.prev_primary_pct,
         "prev_secondary_pct": st.prev_secondary_pct,
+        "secondary_exhausted_at": st.secondary_exhausted_at,
+        "stats_reset_at": st.stats_reset_at,
         "last_weekly_eta": st.last_weekly_eta,
         "weekly_ratio_plan": st.weekly_ratio_plan,
         "weekly_ratio_windows": st.weekly_ratio_windows,

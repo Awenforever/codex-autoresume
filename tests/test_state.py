@@ -61,6 +61,20 @@ class TestState(unittest.TestCase):
         self.assertEqual(st2.threads["t1"].total_resumes, 3)
         self.assertEqual(st2.threads["t1"].success_resumes, 2)
 
+    def test_stats_reset_survives_reload(self):
+        d = tempfile.mkdtemp(prefix="cxr-zsucc-")
+        path = os.path.join(d, "state.json")
+        st = WatcherState(state_path=path)
+        t = st.thread("t1")
+        t.append_history({"at": "a", "ok": True})
+        t.append_history({"at": "b", "ok": True})
+        st.stats_reset_at = "2026-10-28T00:00:00+00:00"
+        save_state(st)
+        st2 = load_state(path)
+        # an operator zeroed the counters: history must not resurrect them
+        self.assertEqual(st2.threads["t1"].success_resumes, 0)
+        self.assertEqual(st2.stats_reset_at, "2026-10-28T00:00:00+00:00")
+
     def test_history_cap(self):
         t = ThreadState()
         for i in range(60):

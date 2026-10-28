@@ -42,6 +42,9 @@ _LANDING_RE = re.compile(
     r"Landing\s+(?:tomorrow|today|next\s+[a-z]+)?\s*"
     r"(?:before|at|around|by)\s*[^<>()!?.]{3,60}", re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
+# X wraps external/media links in t.co shorteners. They carry no readable
+# information in the panel and often point at deleted/expired cards.
+_TCO_RE = re.compile(r"https?://t\.co/\S+", re.IGNORECASE)
 _UTC_CLOCK = re.compile(r"(\d{1,2}):(\d{2})\s*UTC")
 _PACIFIC_CLOCK = re.compile(
     r"((?:tomorrow|today)[^0-9]{0,12})?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*"
@@ -478,7 +481,7 @@ def _merge_posts(*groups) -> list[dict]:
     for posts in groups:
         for p in posts or []:
             at = _norm_iso(p.get("at"))
-            text = _clean(p.get("text"))
+            text = _clean(_TCO_RE.sub("", p.get("text") or ""))
             if not at or not text:
                 continue
             rec = dict(p, at=at, text=text)

@@ -1004,17 +1004,26 @@ class Daemon:
             st = self.state
             prev_p, prev_s = st.prev_primary_pct, st.prev_secondary_pct
             cur_p, cur_s = snap.primary.used_percent, snap.secondary.used_percent
+            now_iso = _now().isoformat(timespec="seconds")
             events = []
+            exhausted_changed = False
             if prev_p is not None and cur_p is not None and prev_p - cur_p >= 10:
-                events.append({"kind": "primary", "at":
-                               _now().isoformat(timespec="seconds")})
+                events.append({"kind": "primary", "at": now_iso})
             if prev_s is not None and cur_s is not None and prev_s - cur_s >= 10:
-                events.append({"kind": "weekly", "at":
-                               _now().isoformat(timespec="seconds")})
+                events.append({"kind": "weekly", "at": now_iso})
             if cur_p is not None:
                 st.prev_primary_pct = cur_p
             if cur_s is not None:
                 st.prev_secondary_pct = cur_s
+                if cur_s >= 100:
+                    # first observation of a full weekly window: remember
+                    # when it actually ran dry, never the reset timestamp
+                    if not st.secondary_exhausted_at:
+                        st.secondary_exhausted_at = now_iso
+                        exhausted_changed = True
+                elif st.secondary_exhausted_at:
+                    st.secondary_exhausted_at = None
+                    exhausted_changed = True
             if events:
                 st.reset_events = (st.reset_events or [])[-19:] + events
                 save_state(st)
@@ -1025,8 +1034,9 @@ class Daemon:
                     # the window really rolled: its interruption evidence is
                     # spent, snapshots are authoritative again
                     self._clear_limit(ev["kind"])
-            elif cur_p is not None or cur_s is not None:
-                # persist the moved baseline even without events
+            elif exhausted_changed or cur_p is not None or cur_s is not None:
+                # persist moved baselines and exhaustion state even without
+                # a rollover event
                 save_state(st)
                 self._state_mtime = os.path.getmtime(st.state_path)
         except Exception:

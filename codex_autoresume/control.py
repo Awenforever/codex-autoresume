@@ -8,6 +8,7 @@ skill / curl) uses to read state and toggle per-thread guarding:
     POST /api/threads/<id>  -> {guard?, weekly?, model?, effort?}
     POST /api/pause         -> {paused: bool}
     POST /api/update        -> {confirm: true}  (self-update + restart)
+    POST /api/stats/reset   -> {confirm: true}  (zero the resume counters)
 
 All writes land in the watcher state file; the running daemon picks them up
 on its next tick (live sync), so toggles take effect within seconds.
@@ -145,6 +146,7 @@ padding:0 6px;margin-right:10px}
 .hl-reset .rl:nth-child(5n){color:var(--reset)}
 .chip{white-space:nowrap}
 .kv .ok{color:var(--accent)} .kv .bad{color:var(--danger)} .kv .eta{color:var(--warn)}
+.kv .ok,.kv .eta{transition:opacity .4s ease,filter .4s ease}
 button{background:var(--card2);border:1px solid var(--line);color:var(--fg);
 border-radius:10px;padding:7px 16px;font-size:13px;cursor:pointer;
 transition:border-color .15s,transform .1s}
@@ -233,9 +235,9 @@ pointer-events:none;box-shadow:0 6px 24px var(--shadow)}
 .controls,.controls2{gap:10px}input[type=text]{width:118px}}
 </style></head><body>
 <header>
- <div class="logowrap" id="logoWrap"><button class="logo" id="logoBtn" onclick="openUpdate()" aria-label="Codex Guard"><svg viewBox="0 0 64 64"><path d="M32 4 54 12v18c0 15-9.5 25.5-22 30C19.5 55.5 10 45 10 30V12Z"
- fill="none" stroke="#fff" stroke-width="5"/><path d="M21 32.5 29 40.5 43 25" fill="none"
- stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></button><span class="upddot" id="updDot"></span></div>
+ <div class="logowrap" id="logoWrap"><button class="logo" id="logoBtn" onclick="openUpdate()" aria-label="Codex Guard"><svg viewBox="0 0 24 24" fill="none">
+ <path d="M12 3.4 19.4 7.7v8.6L12 20.6 4.6 16.3V7.7Z" stroke="#fff" stroke-width="2"
+ stroke-linejoin="round"/><path d="M9.8 8.4 15.8 12 9.8 15.6Z" fill="#fff"/></svg></button><span class="upddot" id="updDot"></span></div>
  <div><div class="hrow"><h1 data-i18n="title">Codex Guard</h1><span class="ver">v__CXR_VERSION__</span></div><div class="sub" data-i18n="sub">Auto-continue conversations after quota resets</div></div>
  <div class="hright" id="chips"></div>
  <button class="btn-mini theme" id="themeBtn" data-mode="auto" onclick="cycleTheme()"><svg class="ic-auto" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.2"/><path d="M12 3.8a8.2 8.2 0 0 1 0 16.4Z" fill="currentColor" stroke="none"/></svg><svg class="ic-sun" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.1"/><path d="M12 2.9v2.2M12 18.9v2.2M2.9 12h2.2M18.9 12h2.2M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/></svg><svg class="ic-moon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20.4 14.2A8.6 8.6 0 0 1 9.8 3.6 8.6 8.6 0 1 0 20.4 14.2Z"/></svg></button>
@@ -377,12 +379,13 @@ function ring(pct,label,reset){
  '<div class="pct" style="color:'+col+'">'+fmt(pct)+"%</div></div>"+
  '<div class="ringlbl">'+label+"</div>"+
  (reset?'<div class="ringreset">'+L("reset")+" "+reset+"</div>":"")+"</div>"}
+function etaTime(v){return (typeof v==="number")?fmtMDHM(v):fmtISO(v)}
 function etaRow(label,q,etaK,rateK,exhK,capK){
  var eta=q[etaK],rate=q[rateK],cap=capK&&q[capK];
  var b=(cap?('<b class="eta">'+L("weeklyfirst")+"</b>")
  :(eta?('<b class="eta">'+fmtMDHM(eta)+"</b>")
- :(exhK&&q[exhK]&&q.secondary_used>=100?
-   ('<b class="eta">'+L("exhausted")+" · "+fmtMDHM(q[exhK])+"</b>")
+ :(exhK&&q.secondary_used>=100?
+   ('<b class="eta">'+L("exhausted")+(q[exhK]?(" · "+etaTime(q[exhK])):"")+"</b>")
  :"<b>--</b>")));
  var tail=(!cap&&rate?(' <span style="font-size:11px">('+rate+"%/h)</span>"):"");
 
@@ -422,6 +425,10 @@ function hlNews(t){
   for(var i=0;i<m.length;i++){w+='<span class="rl">'+m.charAt(i)+"</span>"}
   return w+"</span>"}
  return '<span class="'+cls+'">'+m+"</span>"})}
+function stripTco(t){
+// X wraps media/external links in t.co shortlinks. Strip at render time too:
+// news_log persisted by older builds can still carry them.
+return String(t||"").replace(/https?:\/\/t\.co\/\S+/gi,"").replace(/\s+/g," ").trim()}
 function newsBox(s){
  var ann=s.announcement||null;
  var es=(s.news_log&&s.news_log.length)?s.news_log:
@@ -432,7 +439,7 @@ function newsBox(s){
  var e=es[i];
  rows+='<div class="nl">'+(e.at?'<span class="d" title="'+L("postAt")+'">'+
  esc(fmtPostAt(e.at))+"</span>":"")+
- hlNews(esc(e.text))+"</div>"}
+ hlNews(esc(stripTco(e.text)))+"</div>"}
  return '<div class="kv"><span>'+L("news")+'</span><span style="font-size:11px">'+
  L("newsWin")+"</span></div>"+'<div class="newsbox" id="newsbox">'+rows+"</div>"}
 function fmtPostAt(iso){
@@ -447,22 +454,36 @@ function fmtPostAt(iso){
  if(r.indexOf("undefined")<0){return r}
  }catch(e){}
  return fmtISO(iso)}
+function freshStyle(epochSec,mode){
+ // freshness: vivid near "now", faded when far away. Forecast decays with
+ // absolute distance (an overdue forecast is stale too); landed decays
+ // with age. Opacity + saturation keep both themes readable.
+ if(epochSec===null||epochSec===undefined||!isFinite(epochSec)){return ""}
+ var now=Date.now()/1000;
+ var horizon=(mode==="forecast")?96*3600:168*3600;
+ var dist=(mode==="forecast")?Math.abs(epochSec-now):Math.max(0,now-epochSec);
+ var f=1-Math.min(1,Math.max(0,dist/horizon));
+ var op=(0.34+0.66*f).toFixed(2),sat=(0.18+0.82*f).toFixed(2);
+ return ' style="opacity:'+op+';filter:saturate('+sat+')"'}
 function annRowsFor(s){
  var ann=s.announcement||null,rows="";
- var fct="--";
- if(ann&&ann.forecast_epoch){fct=fmtMDHM(ann.forecast_epoch)}
- rows+=kvRow(L("forecast"),'<b class="eta">'+fct+"</b>");
+ var fct="--",fst="";
+ if(ann&&ann.forecast_epoch){fct=fmtMDHM(ann.forecast_epoch);
+  fst=freshStyle(ann.forecast_epoch,"forecast")}
+ rows+=kvRow(L("forecast"),'<b class="eta"'+fst+">"+fct+"</b>");
  var cand=[];
  var evs=s.reset_events||[];
  for(var i=0;i<evs.length;i++){if(evs[i].kind==="weekly"||evs[i].kind==="credit")cand.push(evs[i])}
  var ces=s.credit_events||[];
  for(var j=0;j<ces.length;j++){cand.push({kind:"credit",at:ces[j].landed_at,title:ces[j].title})}
- var landTxt="--";
+ var landTxt="--",lst="";
  if(cand.length){
  cand.sort(function(a,b){return String(b.at).localeCompare(String(a.at))});
  var e0=cand[0];
- landTxt=fmtISO(e0.at)+" · "+(e0.kind==="weekly"?L("wk"):L("card"))}
- rows+=kvRow(L("landed"),'<b class="ok">'+esc(landTxt)+"</b>");
+ landTxt=fmtISO(e0.at)+(e0.kind==="credit"?(" · "+L("card")):"");
+ var lsec=Date.parse(e0.at)/1000;
+ lst=freshStyle(lsec,"landed")}
+ rows+=kvRow(L("landed"),'<b class="ok"'+lst+">"+esc(landTxt)+"</b>");
  rows+=newsBox(s)
  return rows}
 function syncUpdateUi(s){
@@ -547,7 +568,7 @@ hinfo.innerHTML=
 kvRow(L("status"),'<b class="'+(q.allowed===false?"bad":"ok")+'">'+
 (q.allowed===false?L("limited"):q.allowed===true?L("avail"):L("unknown"))+"</b>")+
 etaRow(L("eta5"),q,"eta_primary","rate_primary")+
-etaRow(L("etaw"),q,"eta_secondary","rate_secondary","secondary_reset","eta_secondary_capped")+
+etaRow(L("etaw"),q,"eta_secondary","rate_secondary","secondary_exhausted_at","eta_secondary_capped")+
 kvRow(L("credits"),'<b>'+fmt((q.credits_count!==undefined)?q.credits_count:q.credits)+"</b>")+
 annRows;
 }
@@ -792,6 +813,12 @@ class ControlApi:
                         return
                     self._json(api.start_update())
                     return
+                if self.path == "/api/stats/reset":
+                    if payload.get("confirm") is not True:
+                        self._json({"error": "confirmation required"}, 400)
+                        return
+                    self._json(api.reset_stats())
+                    return
                 if self.path.startswith("/api/threads/"):
                     tid = self.path[len("/api/threads/"):].strip("/")
                     self._json(api.set_thread(tid, payload))
@@ -920,6 +947,8 @@ class ControlApi:
                 "primary_reset": snap.primary.resets_at,
                 "secondary_used": snap.secondary.used_percent,
                 "secondary_reset": snap.secondary.resets_at,
+                "secondary_exhausted_at": (
+                    st.secondary_exhausted_at if st else None),
                 "credits": len(snap.reset_credits),
                 "allowed": snap.ordinary_usage_allowed,
                 "fetched_at": getattr(d, "_snapshot_wall", None),
@@ -963,6 +992,23 @@ class ControlApi:
             return fn()
         except Exception as e:     # never let the panel see a stack trace
             return {"started": False, "error": str(e)[:300]}
+
+    def reset_stats(self) -> dict:
+        """Zero the displayed resumed/attempts counters.
+
+        Daily/global budget counters are untouched; stats_reset_at stops
+        load_state from re-deriving successes out of the kept history.
+        """
+        from datetime import datetime, timezone
+        st = self.daemon.state
+        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        for t in st.threads.values():
+            t.success_resumes = 0
+            t.total_resumes = 0
+        st.stats_reset_at = now_iso
+        save_state(st)
+        self.daemon._state_mtime = os.path.getmtime(st.state_path)
+        return {"reset": True, "at": now_iso}
 
     def set_paused(self, paused: bool) -> dict:
         st = self.daemon.state

@@ -155,47 +155,143 @@ console.log(JSON.stringify(out));
         self.assertEqual(got, [True, False, False, False, True, True])
 
 
-class PanelWeeklyCapTest(unittest.TestCase):
-    """A capped weekly ETA says "resets first" and drops the %/h tail."""
+def _panel_js():
+    from codex_autoresume.control import PANEL_HTML
+    return re.search(r"<script>(.*)</script>", PANEL_HTML, re.S).group(1)
 
-    def test_capped_row(self):
-        node = shutil.which("node")
-        if not node:
+
+def _fn(js, name):
+    """Extract one top-level function by brace matching."""
+    i = js.index("function " + name + "(")
+    j = js.index("{", i)
+    depth = 0
+    for k in range(j, len(js)):
+        if js[k] == "{":
+            depth += 1
+        elif js[k] == "}":
+            depth -= 1
+            if depth == 0:
+                return js[i:k + 1]
+    raise AssertionError("unterminated function " + name)
+
+
+def _run_node(harness):
+    fd, path = tempfile.mkstemp(suffix=".js")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(harness)
+        r = subprocess.run(["node", path], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=30)
+        assert r.returncode == 0, r.stderr[:2000]
+        return json.loads(r.stdout.strip().splitlines()[-1])
+    finally:
+        os.unlink(path)
+
+
+class PanelWeeklyEtaTest(unittest.TestCase):
+    """Capped points at the weekly reset; exhausted at the real dry time."""
+
+    def test_rows(self):
+        if not shutil.which("node"):
             self.skipTest("node not installed")
-        from codex_autoresume.control import PANEL_HTML
-        js = re.search(r"<script>(.*)</script>", PANEL_HTML, re.S).group(1)
-        m = re.search(r"function etaRow\(.*?\}", js, re.S)
-        self.assertTrue(m, "etaRow not found in panel script")
-        harness = m.group(0) + r"""
-var I18N = {en: {weeklyfirst: "Weekly resets first",
-                 exhausted: "Exhausted"}};
-function L(k){ return I18N.en[k] || k }
-function fmtMDHM(e){ return "T" + Math.round(e) }
-const q = {eta_secondary: 1234, rate_secondary: 6.2,
-           eta_secondary_capped: true, secondary_used: 34,
-           secondary_reset: 9999};
-const capped = etaRow("w", q, "eta_secondary", "rate_secondary",
-                      "secondary_reset", "eta_secondary_capped");
-const plain = etaRow("w", {eta_secondary: 1234, rate_secondary: 6.2,
-                           secondary_used: 34, eta_secondary_capped: false},
-                     "eta_secondary", "rate_secondary",
-                     "secondary_reset", "eta_secondary_capped");
-console.log(JSON.stringify([capped, plain]));
+        js = _panel_js()
+        harness = "\n".join([_fn(js, "etaTime"), _fn(js, "etaRow")]) + r"""
+var I18N={en:{weeklyfirst:"Weekly resets first",exhausted:"Exhausted"}};
+function L(k){return I18N.en[k]||k}
+function fmtMDHM(e){return "T"+Math.round(e)}
+function fmtISO(iso){return "I("+iso+")"}
+var common={rate_secondary:6.2,eta_secondary_capped:false,
+            secondary_used:34,secondary_reset:9999};
+var capped=etaRow("w",Object.assign({},common,{eta_secondary:1234,
+               eta_secondary_capped:true}),
+               "eta_secondary","rate_secondary",
+               "secondary_exhausted_at","eta_secondary_capped");
+var plain=etaRow("w",Object.assign({},common,{eta_secondary:1234}),
+               "eta_secondary","rate_secondary",
+               "secondary_exhausted_at","eta_secondary_capped");
+var dry=etaRow("w",Object.assign({},common,{eta_secondary:null,
+               rate_secondary:null,secondary_used:100,
+               secondary_exhausted_at:"2026-10-26T05:21:22Z"}),
+               "eta_secondary","rate_secondary",
+               "secondary_exhausted_at","eta_secondary_capped");
+var dry0=etaRow("w",Object.assign({},common,{eta_secondary:null,
+               rate_secondary:null,secondary_used:100,
+               secondary_exhausted_at:null}),
+               "eta_secondary","rate_secondary",
+               "secondary_exhausted_at","eta_secondary_capped");
+console.log(JSON.stringify([capped,plain,dry,dry0]));
 """
-        fd, path = tempfile.mkstemp(suffix=".js")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(harness)
-            r = subprocess.run([node, path], capture_output=True, text=True,
-                               timeout=30)
-            self.assertEqual(r.returncode, 0, r.stderr[:2000])
-            capped, plain = json.loads(r.stdout.strip().splitlines()[-1])
-        finally:
-            os.unlink(path)
+        capped, plain, dry, dry0 = _run_node(harness)
         self.assertIn("Weekly resets first", capped)
         self.assertNotIn("%/h", capped)
         self.assertIn("T1234", plain)
         self.assertIn("6.2%/h", plain)
+        # the real exhaustion instant, never the weekly reset (T9999)
+        self.assertIn("Exhausted \u00b7 I(2026-10-26T05:21:22Z)", dry)
+        self.assertNotIn("T9999", dry)
+        self.assertIn("Exhausted", dry0)
+        self.assertNotIn("\u00b7", dry0)
+        self.assertNotIn("T9999", dry0)
+
+
+class PanelLandedTest(unittest.TestCase):
+    """Landed is a full reset: no weekly label, and it fades with age."""
+
+    def test_landed_has_no_weekly_label(self):
+        if not shutil.which("node"):
+            self.skipTest("node not installed")
+        js = _panel_js()
+        harness = "\n".join([_fn(js, "freshStyle"),
+                             _fn(js, "annRowsFor")]) + r"""
+var I18N={en:{forecast:"Forecast",landed:"Landed",card:"Credits",wk:"Weekly"}};
+function L(k){return I18N.en[k]||k}
+function kvRow(k,v){return k+"="+v+"\n"}
+function newsBox(s){return ""}
+function esc(s){return String(s)}
+function fmtISO(iso){return "I("+iso+")"}
+function fmtMDHM(e){return "T"+Math.round(e)}
+var weeklyOnly={announcement:null,credit_events:[],
+  reset_events:[{kind:"weekly",at:"2026-10-26T05:21:22Z"},
+                {kind:"credit",at:"2026-10-20T01:00:00Z"}]};
+var creditNew={announcement:null,reset_events:[],
+  credit_events:[{landed_at:"2026-10-27T00:00:00Z",title:"Reset"}]};
+console.log(JSON.stringify([annRowsFor(weeklyOnly),annRowsFor(creditNew)]));
+"""
+        weekly, credit = _run_node(harness)
+        self.assertIn("Landed=", weekly)
+        self.assertIn("I(2026-10-26T05:21:22Z)", weekly)
+        self.assertNotIn("Weekly", weekly)
+        self.assertNotIn("\u00b7", weekly)
+        self.assertIn("Credits", credit)
+        self.assertIn("I(2026-10-27T00:00:00Z)", credit)
+
+
+class PanelFreshnessTest(unittest.TestCase):
+    """Forecast/landed text is vivid near now and fades when far away."""
+
+    def test_style_decays_with_distance(self):
+        if not shutil.which("node"):
+            self.skipTest("node not installed")
+        js = _panel_js()
+        harness = _fn(js, "freshStyle") + r"""
+var now=Date.now()/1000;
+function op(s){var m=/opacity:([0-9.]+)/.exec(s);return m?parseFloat(m[1]):null}
+console.log(JSON.stringify({
+  nearF:op(freshStyle(now,"forecast")),
+  farF:op(freshStyle(now-96*3600,"forecast")),
+  staleF:op(freshStyle(now-200*3600,"forecast")),
+  nearL:op(freshStyle(now-60,"landed")),
+  oldL:op(freshStyle(now-168*3600,"landed")),
+  none:freshStyle(null,"landed")
+}));
+"""
+        got = _run_node(harness)
+        self.assertGreaterEqual(got["nearF"], 0.95)
+        self.assertLessEqual(got["farF"], 0.4)
+        self.assertLessEqual(got["staleF"], 0.4)
+        self.assertGreaterEqual(got["nearL"], 0.95)
+        self.assertLessEqual(got["oldL"], 0.4)
+        self.assertEqual(got["none"], "")
 
 
 class PanelVersionTest(unittest.TestCase):
@@ -258,7 +354,8 @@ class PanelEscapingTest(unittest.TestCase):
 
     def test_news_text_and_thread_ids_go_through_escapers(self):
         from codex_autoresume.control import PANEL_HTML
-        self.assertIn("hlNews(esc(e.text))", PANEL_HTML)
+        self.assertIn("hlNews(esc(stripTco(e.text)))", PANEL_HTML)
+        self.assertNotIn("hlNews(esc(e.text))", PANEL_HTML)
         self.assertNotIn("hlNews(e.text)", PANEL_HTML)
         self.assertIn('title="\'+L("postAt")+\'">\'+\n esc(fmtPostAt(e.at))',
                       PANEL_HTML)
@@ -278,6 +375,7 @@ class PanelEscapingTest(unittest.TestCase):
 const out = {
   esc: esc("<img src=x onerror='alert(1)'>&\""),
   news: hlNews(esc("<img src=x onerror=alert(1)> reset at 15:00")),
+  tco: stripTco("Terra is back https://t.co/1ilnCkAPuy now"),
   jsq: jsq("a'b\\c<d\"e&f")
 };
 console.log(JSON.stringify(out));
@@ -300,6 +398,7 @@ console.log(JSON.stringify(out));
         self.assertNotIn("<img", got["news"])
         self.assertIn("&lt;img", got["news"])
         self.assertIn("hl-reset", got["news"])
+        self.assertEqual(got["tco"], "Terra is back now")
         self.assertEqual(got["jsq"], "a\\&#39;b\\\\c&lt;d&quot;e&amp;f")
 
 

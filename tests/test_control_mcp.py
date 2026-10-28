@@ -118,6 +118,33 @@ class TestControlApi(unittest.TestCase):
         self.assertTrue(out["started"])
         self.assertEqual(out["to"], "9.9.9")
 
+    def test_stats_reset_requires_confirmation(self):
+        req = urllib.request.Request(
+            self.base + "/api/stats/reset", data=b'{"confirm": false}',
+            headers={"Content-Type": "application/json"}, method="POST")
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(ctx.exception.code, 400)
+        ctx.exception.close()
+
+    def test_stats_reset_zeroes_display_counters_only(self):
+        t = self.daemon.state.threads["t-alpha"]
+        t.success_resumes = 17
+        t.total_resumes = 24
+        t.resume_count_today = 3
+        t.append_history({"at": "a", "ok": True})
+        out = self._post("/api/stats/reset", {"confirm": True})
+        self.assertTrue(out["reset"])
+        st = load_state(self.daemon.state_path)
+        t2 = st.threads["t-alpha"]
+        self.assertEqual((t2.success_resumes, t2.total_resumes), (0, 0))
+        # budgets are untouched: only the displayed history is zeroed
+        self.assertEqual(t2.resume_count_today, 3)
+        self.assertTrue(st.stats_reset_at)
+        alpha = [x for x in self._get("/api/status")["threads"]
+                 if x["id"] == "t-alpha"][0]
+        self.assertEqual((alpha["resumes"], alpha["attempts"]), (0, 0))
+
     def test_weekly_eta_freezes_only_with_a_measured_pool(self):
         import time as _time
         from codex_autoresume.ratelimits import QuotaSnapshot, Window

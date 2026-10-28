@@ -238,6 +238,19 @@ class MergeTest(unittest.TestCase):
         merged = mod._merge_posts([b], [a])
         self.assertEqual(merged[0]["source"], "codex-reset")
 
+    def test_tco_shortlinks_are_stripped(self):
+        # X wraps media/external links in t.co; the panel must not show
+        # opaque shortlinks (they often point at deleted cards).
+        a = {"id": "1", "at": "2026-10-26T05:21:22Z",
+             "text": "https://t.co/Fgy0dBAHsJ has landed",
+             "source": "willreset"}
+        b = {"id": "2", "at": "2026-10-26T06:21:22Z",
+             "text": "Terra is back https://t.co/1ilnCkAPuy",
+             "source": "codex-reset"}
+        merged = mod._merge_posts([a, b])
+        self.assertEqual([p["text"] for p in merged],
+                         ["has landed", "Terra is back"])
+
     def test_cap_keeps_newest_80(self):
         posts = [{"id": str(i), "at": "2026-10-26T%02d:%02d:00Z"
                   % (i // 60 % 24, i % 60), "text": "post %d" % i,
