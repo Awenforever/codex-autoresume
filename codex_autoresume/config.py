@@ -85,6 +85,11 @@ DEFAULTS: dict[str, Any] = {
         "resume_timeout_sec": 21600,
         # concurrent resume invocations
         "max_concurrent_resumes": 2,
+        # a guarded conversation whose newest turn was interrupted (Stop
+        # button / app quit) is continued like the app's Continue button
+        # once the turn has been idle this long (0 disables nothing; it is
+        # a settle window so a just-pressed Stop is not fought instantly)
+        "stopped_continue_sec": 60,
     },
     "resume": {
         # "exec"  -> codex exec resume <id> "<prompt>" (supports model overrides)
@@ -167,7 +172,7 @@ DEFAULTS: dict[str, Any] = {
 
 _THREAD_KEYS = {
     "enabled", "model", "reasoning_effort", "prompt", "mode", "weekly_resume",
-    "max_resumes_per_day",
+    "max_resumes_per_day", "priority",
 }
 
 
@@ -243,6 +248,11 @@ def _validate(cfg: dict) -> None:
             )
         if "mode" in t and t["mode"] not in ("exec", "queue"):
             raise ConfigError("threads.%s.mode must be exec|queue" % tid)
+        prio = t.get("priority")
+        if prio is not None and (isinstance(prio, bool)
+                                 or not isinstance(prio, int) or prio < 0):
+            raise ConfigError(
+                "threads.%s.priority must be a non-negative integer" % tid)
 
 
 def thread_config(cfg: dict, thread_id: str) -> dict:
@@ -262,6 +272,7 @@ def thread_config(cfg: dict, thread_id: str) -> dict:
         "mode": None,
         "weekly_resume": None,
         "max_resumes_per_day": None,
+        "priority": None,
     }
     if match is not None:
         for k, v in cfg["threads"][match].items():

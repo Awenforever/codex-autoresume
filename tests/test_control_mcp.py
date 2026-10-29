@@ -202,6 +202,18 @@ class TestControlApi(unittest.TestCase):
         self.assertTrue(alpha["weekly"])
         self.assertEqual(alpha["model"], "gpt-6.1-sol")
 
+    def test_priority_roundtrip_and_clamp(self):
+        out = self._post("/api/threads/t-alpha", {"priority": 2})
+        self.assertEqual(out["priority"], 2)
+        st = load_state(self.daemon.state_path)
+        self.assertEqual(st.threads["t-alpha"].priority, 2)
+        alpha = [x for x in self._get("/api/status")["threads"]
+                 if x["id"] == "t-alpha"][0]
+        self.assertEqual(alpha["priority"], 2)
+        # negative values clamp to the highest priority instead of erroring
+        out = self._post("/api/threads/t-alpha", {"priority": -3})
+        self.assertEqual(out["priority"], 0)
+
     def test_pause_endpoint(self):
         self._post("/api/pause", {"paused": True})
         self.assertTrue(self._get("/api/status")["paused"])

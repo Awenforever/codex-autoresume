@@ -67,6 +67,34 @@ class TestConfig(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_priority_validation(self):
+        from codex_autoresume.config import ConfigError, load_config
+        for bad in ("-1", "true", '"high"'):
+            with tempfile.NamedTemporaryFile("w", suffix=".toml",
+                                             delete=False) as f:
+                f.write('[threads."01a05ddb-0483"]\npriority = %s\n' % bad)
+                path = f.name
+            try:
+                with self.assertRaises(ConfigError):
+                    load_config(path)
+            finally:
+                os.unlink(path)
+        with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False,
+                                         encoding="utf-8") as f:
+            f.write('[threads."01a05ddb-0483"]\npriority = 2\n')
+            path = f.name
+        try:
+            cfg = load_config(path)
+        finally:
+            os.unlink(path)
+        self.assertEqual(cfg["threads"]["01a05ddb-0483"]["priority"], 2)
+
+    def test_stopped_continue_settle_default(self):
+        from codex_autoresume.config import load_config
+        cfg = load_config(os.path.join(tempfile.gettempdir(),
+                                       "nonexistent-cxr.toml"))
+        self.assertEqual(cfg["general"]["stopped_continue_sec"], 60)
+
     def test_thread_config_lookup(self):
         import copy
         from codex_autoresume.config import thread_config

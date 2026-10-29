@@ -254,6 +254,8 @@ box-shadow:var(--glass-hi),0 2px 10px rgba(var(--accent-rgb),.08)}
 .tcard:hover{border-color:var(--glass-brd);transform:translateY(-2px);
 box-shadow:var(--glass-hi),var(--lift-shadow)}
 .tcard.guard:hover{box-shadow:var(--glass-hi),0 4px 14px rgba(var(--accent-rgb),.12)}
+/* an open dropdown must paint above the following cards */
+.tcard.ddhost{position:relative;z-index:60}
 .thead{display:flex;align-items:center;gap:9px}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--tickmaj);flex:none}
 .tcard.guard .dot{background:var(--accent);
@@ -286,6 +288,7 @@ backdrop-filter:blur(16px) saturate(160%);
 box-shadow:0 14px 34px var(--shadow),var(--glass-hi);opacity:0;pointer-events:none;
 transition:opacity .16s ease;z-index:9999;text-align:left}
 .tip:hover:after,.tipn:hover:after{opacity:1}
+.ctl:has(.dd.open):after{display:none}
 .tipn{cursor:default}
 .tip.end:after{left:auto;right:-8px;transform:none}
 .tip.start:after{left:-8px;transform:none}
@@ -308,12 +311,50 @@ transition:border-color .18s,box-shadow .2s,background .2s}
 input[type=text]:focus{outline:none;border-color:rgba(var(--accent-rgb),.65);
 box-shadow:var(--inset),0 0 0 3px rgba(var(--accent-rgb),.16)}
 input::placeholder{color:var(--ph)}
-select{background:var(--face);border:1px solid var(--glass-brd-soft);color:var(--fg);
-border-radius:9px;padding:6px 8px;font-size:12.5px;width:126px;box-shadow:var(--inset);
-transition:border-color .18s,box-shadow .2s}
-select:focus{outline:none;border-color:rgba(var(--accent-rgb),.65);
+.dd{position:relative}
+.ddbtn{background:var(--face);border:1px solid var(--glass-brd-soft);color:var(--fg);
+border-radius:9px;padding:5px 24px 5px 9px;font-family:inherit;font-size:12.5px;
+line-height:1.5;min-width:126px;max-width:180px;box-shadow:var(--inset);cursor:pointer;
+text-align:left;position:relative;white-space:nowrap;overflow:hidden;
+text-overflow:ellipsis;-webkit-backdrop-filter:none;backdrop-filter:none;
+transition:border-color .18s,box-shadow .2s,background .2s}
+.ddbtn:hover{transform:none;border-color:rgba(var(--accent-rgb),.4);
+box-shadow:var(--inset)}
+.ddbtn:active{transform:none}
+.dd.open .ddbtn,.ddbtn:focus-visible{outline:none;
+border-color:rgba(var(--accent-rgb),.65);
 box-shadow:var(--inset),0 0 0 3px rgba(var(--accent-rgb),.16)}
-select:disabled{opacity:.45;cursor:not-allowed}
+.ddbtn:after{content:"";position:absolute;right:11px;top:50%;width:5px;height:5px;
+border-right:1.5px solid var(--dim);border-bottom:1.5px solid var(--dim);
+transform:translateY(-70%) rotate(45deg);pointer-events:none;
+transition:transform .16s ease}
+.dd.open .ddbtn:after{transform:translateY(-30%) rotate(225deg)}
+.dd.open:after{display:none}
+.dd.dis .ddbtn{opacity:.45;cursor:not-allowed}
+.ddmenu{position:absolute;top:calc(100% + 5px);left:0;z-index:2000;min-width:100%;
+max-width:270px;max-height:248px;overflow-y:auto;overflow-x:hidden;
+background:var(--modal-bg);border:1px solid var(--glass-brd);border-radius:11px;
+padding:4px;box-shadow:0 14px 34px var(--shadow),var(--glass-hi);display:none;
+-webkit-backdrop-filter:blur(18px) saturate(160%);
+backdrop-filter:blur(18px) saturate(160%)}
+.dd.open .ddmenu{display:block;animation:ddIn .14s ease}
+.ddmenu.up{top:auto;bottom:calc(100% + 5px)}
+.ddmenu.right{left:auto;right:0}
+@keyframes ddIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+.ddopt{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--fg);
+padding:5px 8px;border-radius:7px;cursor:pointer;white-space:nowrap}
+.ddopt:hover,.ddopt:focus{background:var(--glass-btn);outline:none}
+.ddopt .ck{width:11px;flex:none;color:var(--accent);font-size:11px;
+visibility:hidden}
+.ddopt.sel .ck{visibility:visible}
+.ddopt .nm{overflow:hidden;text-overflow:ellipsis}
+.ddopt small{margin-left:auto;padding-left:12px;color:var(--dim);font-size:11px}
+.dd.prio{flex:none}
+.dd.prio .ddbtn{min-width:44px;max-width:44px;padding:4px 18px 4px 6px;
+text-align:center;font-variant-numeric:tabular-nums;color:var(--dim);font-size:12px}
+.dd.prio .ddbtn:after{right:7px}
+.dd.prio .ddmenu{min-width:118px;left:auto;right:0}
+@media (max-width:680px){.ddbtn{min-width:112px}}
 .prow{display:flex;gap:8px;align-items:center;padding:10px 0 0 17px;
 border-top:1px dashed var(--line);margin-top:10px;flex-wrap:wrap}
 .prow input{flex:1;min-width:220px}
@@ -405,7 +446,7 @@ news:"动态",pauseAll:"全部暂停",resumeAll:"全部继续",
 recent:"近期会话",
 noThread:"暂无近期会话——在 Codex 里打开一个对话，面板会自动刷新",
 guard:"守护",weekly:"跨周",card:"重置卡",noneC:"（无）",expirePfx:"（到期 ",
-model:"模型",inherit:"继承",prompt:"继续指令",resetD:"恢复默认",
+model:"模型",inherit:"继承",rsn:"推理",prompt:"继续指令",resetD:"恢复默认",
 lastUpd:"最近",resumed:"成功恢复",times:" 次",tryPfx:"（尝试 ",trySfx:"）",
 
 tipGuard:"打开则表示 5h 额度耗尽后自动继续任务",
@@ -416,7 +457,8 @@ postAt:"动态发布时间",exhausted:"已耗尽",newsWin:"近 48 小时",clkLoc
 tipModel:"每次自动恢复时使用的模型/推理强度；选「继承」则沿用对话自身设置",
 tipModelGoal:"/goal 会话由桌面应用驱动，固定沿用对话自身设置，因此锁定为继承",g_usage_limited:"额度受限",g_budget_limited:"预算受限",g_active:"运行中",
 g_paused:"已暂停",g_blocked:"受阻",g_complete:"已完成",
-goalOK:"✓ 已自动继续",uiaOK:"✓ 已点继续",writerBusy:"会话被 Codex 应用占用，切走/关闭后自动接管",quotaWait:"等待额度",capacityWait:"等待模型容量",
+tipPrio:"优先级：0 最高。额度恢复后同优先级一起继续；低优先级会等更高优先级的任务完成后才继续",prioTop:"最高",
+goalOK:"✓ 已自动继续",uiaOK:"✓ 已点继续",contOK:"✓ 已继续",writerBusy:"会话被 Codex 应用占用，切走/关闭后自动接管",quotaWait:"等待额度",capacityWait:"等待模型容量",
 errConn:"无法连接守护进程：",errTimeout:"请求超时（8 秒无响应）",errFail:"连接失败",
 errHint:"。面板每 15 秒自动重试；若持续失败，请确认守护进程在运行：",
 upd:"已更新",restored:"已恢复默认指令",pauseOK:"守护已暂停",resumeOK:"守护已恢复",
@@ -432,7 +474,7 @@ news:"News",pauseAll:"Pause all",resumeAll:"Resume all",
 recent:"Recent conversations",
 noThread:"No recent conversations — open one in Codex; the panel refreshes automatically",
 guard:"Auto-resume",weekly:"Weekly",card:"Credits",noneC:"(none)",
-expirePfx:" (expires ",model:"Model",inherit:"Inherit",prompt:"Resume prompt",
+expirePfx:" (expires ",model:"Model",inherit:"Inherit",rsn:"Reasoning",prompt:"Resume prompt",
 resetD:"Reset",lastUpd:"Last",resumed:"resumed",times:"×",tryPfx:" (",
 trySfx:" tries)",
 tipGuard:"On: automatically continue this thread when the 5h quota resets",
@@ -443,7 +485,8 @@ postAt:"post publication time",exhausted:"Exhausted",newsWin:"last 48h",clkLocal
 tipModel:"Model/reasoning used for every automatic resume; Inherit keeps the conversation's own settings",
 tipModelGoal:"/goal threads are driven by the desktop app and always use their own settings, so they stay locked",g_usage_limited:"quota-limited",g_budget_limited:"budget-limited",g_active:"active",
 g_paused:"paused",g_blocked:"blocked",g_complete:"complete",
-goalOK:"✓ auto-continued",uiaOK:"✓ Continue clicked",writerBusy:"held by the Codex app; guard resumes once released",quotaWait:"waiting for quota",capacityWait:"waiting for model capacity",
+tipPrio:"Priority: 0 is highest. Same priority resumes together; lower priorities wait until higher-priority tasks finish",prioTop:"highest",
+goalOK:"✓ auto-continued",uiaOK:"✓ Continue clicked",contOK:"✓ continued",writerBusy:"held by the Codex app; guard resumes once released",quotaWait:"waiting for quota",capacityWait:"waiting for model capacity",
 errConn:"Cannot reach guard daemon: ",errTimeout:"request timed out (8s)",
 errFail:"connection failed",
 errHint:". The panel retries every 15s; if this persists, start the daemon: ",
@@ -518,9 +561,48 @@ function api(p,o,ms){var init=o?{method:"POST",headers:{"Content-Type":"applicat
 body:JSON.stringify(o)}:undefined;
 var tp=new Promise(function(_,rej){setTimeout(function(){rej(new Error("timeout"))},ms||8000)});
 return Promise.race([fetch(p,init).then(function(r){return r.json()}),tp])}
-function modelOpts(cur){var o="";var ms=(window.__s&&window.__s.models)||[];
-for(var k=0;k<ms.length;k++){o+='<option '+((cur||"")===ms[k].id?"selected":"")+' value="'+esc(ms[k].id)+'">'+esc(ms[k].name)+"</option>"}
+var PRIO_MAX=5;
+function ddModelOpts(cur){var o="";var ms=(window.__s&&window.__s.models)||[];
+for(var k=0;k<ms.length;k++){var sel=(cur||"")===ms[k].id;
+o+='<div class="ddopt'+(sel?" sel":"")+'" role="option" tabindex="0" data-v="'+
+esc(ms[k].id)+'" data-l="'+esc(ms[k].name)+
+'" onclick="ddPick(this,\'model\')"><span class="ck">✓</span>'+
+'<span class="nm">'+esc(ms[k].name)+"</span></div>"}
 return o}
+function ddClose(){var os=document.querySelectorAll(".dd.open");
+for(var i=0;i<os.length;i++){os[i].classList.remove("open")}
+var hs=document.querySelectorAll(".tcard.ddhost");
+for(var j=0;j<hs.length;j++){hs[j].classList.remove("ddhost")}}
+function ddToggle(btn){var dd=btn.closest?btn.closest(".dd"):null;
+if(!dd||dd.classList.contains("dis"))return;
+var was=dd.classList.contains("open");ddClose();
+if(!was){dd.classList.add("open");
+var card=dd.closest(".tcard");if(card)card.classList.add("ddhost");
+var menu=dd.querySelector(".ddmenu"),sel=menu&&menu.querySelector(".ddopt.sel");
+if(menu){
+if(menu.getBoundingClientRect().bottom>window.innerHeight-6)menu.classList.add("up");
+if(menu.getBoundingClientRect().right>window.innerWidth-6)menu.classList.add("right");
+if(sel){var mr=menu.getBoundingClientRect(),sr=sel.getBoundingClientRect();
+menu.scrollTop+=sr.top-mr.top-menu.clientHeight/2+sel.offsetHeight/2}}}}
+function ddPick(opt,key){var dd=opt.closest?opt.closest(".dd"):null;
+if(!dd)return;
+var opts=dd.querySelectorAll(".ddopt");
+for(var i=0;i<opts.length;i++){opts[i].classList.toggle("sel",opts[i]===opt)}
+var bt=dd.querySelector(".ddbtn");
+if(bt){bt.textContent=opt.getAttribute("data-l")||opt.textContent}
+dd.classList.remove("open");
+var o={};o[key]=opt.getAttribute("data-v")||"";
+setT(dd.getAttribute("data-tid"),o)}
+document.addEventListener("click",function(e){
+var n=e.target;
+while(n&&n!==document.body){if(n.classList&&n.classList.contains("dd"))return;
+n=n.parentNode}
+ddClose()});
+document.addEventListener("keydown",function(e){
+if(e.key==="Escape"){ddClose();return}
+var n=e.target;
+if((e.key==="Enter"||e.key===" ")&&n&&n.classList&&
+n.classList.contains("ddopt")){e.preventDefault();n.click()}})
 function esc(s){return String(s===null||s===undefined?"":s).replace(/&/g,"&amp;")
 .replace(/</g,"&lt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
 function jsq(s){return esc(String(s===null||s===undefined?"":s)
@@ -706,6 +788,11 @@ function runUpdate(){
    L("updFailed")+((e&&e.message)||L("errFail"));
  });
 }
+function threadsInteractive(){
+var b=document.getElementById("threads");if(!b)return false;
+if(b.querySelector(".dd.open"))return true;
+var a=document.activeElement;
+return !!(a&&b.contains(a)&&(a.tagName==="INPUT"||a.tagName==="TEXTAREA"))}
 function refresh(){
 return api("/api/status").then(function(s){
 window.__s=s;
@@ -739,13 +826,6 @@ annRows+newsBox(s);
 }
 document.getElementById("chips").innerHTML=
 s.dry_run?'<span class="chip dry">DRY-RUN</span>':"";
-var dl="";
-if(s.models&&s.models.length){
-dl='<datalist id="models">';
-for(var i=0;i<s.models.length;i++){dl+='<option value="'+esc(s.models[i].id)+'">'+
-esc(s.models[i].name)+"</option>"}
-dl+="</datalist>";
-}
 var defp=s.default_prompt||"";
 var rows="";
 var ts=s.threads||[];
@@ -757,7 +837,7 @@ var badges=(t.is_goal?'<span class="badge goal">GOAL</span>':"")+
 esc(t.run==="running"?L("stRunning"):L("stWaiting"))+"</span>":"");
 var tries=(t.attempts&&t.attempts>t.resumes)?(L("tryPfx")+t.attempts+L("trySfx")):"";
 var oc=t.last_outcome;
-var ocMap={"goal_continue":"goalOK","uia_continue":"uiaOK","writer_busy":"writerBusy","usage_limit":"quotaWait","capacity_wait":"capacityWait","server_overloaded":"capacityWait","overloaded":"capacityWait"};
+var ocMap={"goal_continue":"goalOK","uia_continue":"uiaOK","continued":"contOK","writer_busy":"writerBusy","usage_limit":"quotaWait","capacity_wait":"capacityWait","server_overloaded":"capacityWait","overloaded":"capacityWait"};
 var ocTxt=oc?(L(ocMap[oc]||"")!==ocMap[oc]?L(ocMap[oc]):esc(oc)):"";
 var cq0=s.quota||{};
 var cc0=(cq0.credits_count!==undefined)?cq0.credits_count:cq0.credits;
@@ -775,19 +855,43 @@ promptRow='<div class="prow"><label style="font-size:12px;color:var(--dim)">'+L(
 '<button class="btn-mini" onclick="resetPrompt(\''+jsq(t.id)+'\')">'+L("resetD")+"</button></div>";
 }
 var rTip=t.is_goal?L("tipModelGoal"):L("tipModel");
-var rsel='<div class="ctl tipn end" data-tip="'+esc(rTip)+
-'"><label>Reasoning</label><select'+(t.is_goal?" disabled":"")+
-' onchange="setT(\''+jsq(t.id)+'\',{effort:this.value})">';
-for(var j=0;j<eff.length;j++){rsel+='<option '+((eff[j]===(t.effort||""))?"selected":"")+
-' value="'+eff[j]+'">'+(eff[j]||L("inherit"))+"</option>"}
-rsel+="</select></div>";
+var rsel='<div class="ctl tipn end" data-tip="'+esc(rTip)+'">'+
+'<label>'+L("rsn")+'</label><div class="dd'+(t.is_goal?" dis":"")+
+'" data-tid="'+esc(t.id)+'"><button type="button" class="ddbtn"'+
+(t.is_goal?" disabled":"")+' aria-haspopup="listbox" onclick="ddToggle(this)">'+
+esc(t.effort||L("inherit"))+'</button><div class="ddmenu" role="listbox">';
+for(var j=0;j<eff.length;j++){rsel+='<div class="ddopt'+
+((eff[j]===(t.effort||""))?" sel":"")+'" role="option" tabindex="0" data-v="'+
+esc(eff[j])+'" data-l="'+esc(eff[j]||L("inherit"))+
+'" onclick="ddPick(this,\'effort\')"><span class="ck">✓</span><span class="nm">'+
+esc(eff[j]||L("inherit"))+"</span></div>"}
+rsel+="</div></div></div>";
 var mTip=t.is_goal?L("tipModelGoal"):L("tipModel");
-var modelCtl='<div class="ctl tipn end" data-tip="'+esc(mTip)+
-'"><label>'+L("model")+'</label><select'+(t.is_goal?" disabled":"")+
-' onchange="setT(\''+jsq(t.id)+'\',{model:this.value})"><option '+((t.model||"")===""?"selected":"")+' value="">'+
-L("inherit")+"</option>"+modelOpts(t.model)+"</select></div>";
-rows+=(i===0?dl:"")+
-'<div class="tcard '+(t.guard?"guard":"")+'">'+
+var modelCtl='<div class="ctl tipn end" data-tip="'+esc(mTip)+'">'+
+'<label>'+L("model")+'</label><div class="dd'+(t.is_goal?" dis":"")+
+'" data-tid="'+esc(t.id)+'"><button type="button" class="ddbtn"'+
+(t.is_goal?" disabled":"")+' aria-haspopup="listbox" onclick="ddToggle(this)">'+
+esc(t.model?((window.__s&&window.__s.models||[]).filter(function(m){
+return m.id===t.model}).map(function(m){return m.name})[0]||t.model):L("inherit"))+
+'</button><div class="ddmenu" role="listbox">'+
+'<div class="ddopt'+((t.model||"")===""?" sel":"")+
+'" role="option" tabindex="0" data-v="" data-l="'+esc(L("inherit"))+
+'" onclick="ddPick(this,\'model\')"><span class="ck">✓</span><span class="nm">'+
+esc(L("inherit"))+"</span></div>"+ddModelOpts(t.model)+"</div></div></div>";
+var pv=(t.priority===undefined||t.priority===null)?0:t.priority;
+var pMax=Math.max(PRIO_MAX,pv);
+var prioCtl='<div class="ctl dd prio tipn start" data-tip="'+esc(L("tipPrio"))+
+'" data-tid="'+esc(t.id)+'"><button type="button" class="ddbtn"'+
+' aria-haspopup="listbox" onclick="ddToggle(this)">P'+pv+
+'</button><div class="ddmenu" role="listbox">';
+for(var q=0;q<=pMax;q++){prioCtl+='<div class="ddopt'+(q===pv?" sel":"")+
+'" role="option" tabindex="0" data-v="'+q+'" data-l="P'+q+
+'" onclick="ddPick(this,\'priority\')"><span class="ck">✓</span>'+
+'<span class="nm">P'+q+"</span>"+(q===0?'<small>'+L("prioTop")+"</small>":"")+
+"</div>"}
+prioCtl+="</div></div>";
+rows+=
+'<div class="tcard '+(t.guard?"guard":"")+'" id="tc_'+esc(t.id)+'">'+
 '<div class="thead"><span class="dot"></span><span class="ttl">'+
 esc((t.title||"")||String(t.id||"").slice(0,13))+"</span>"+badges+"</div>"+
 '<div class="meta">'+L("lastUpd")+" "+fmtMS(t.updated_ms)+" · "+L("resumed")+" <em>"+fmt(t.resumes)+
@@ -803,11 +907,14 @@ esc((t.title||"")||String(t.id||"").slice(0,13))+"</span>"+badges+"</div>"+
 '<label class="sw"><input type="checkbox"'+(t.weekly?" checked":"")+
 ' onchange="setT(\''+jsq(t.id)+'\',{weekly:this.checked})"><i></i></label>'+
 '<label>'+L("weekly")+"</label></div>"+
-cardSwitch+"</div>"+
+cardSwitch+prioCtl+"</div>"+
 '<div class="controls2">'+modelCtl+rsel+"</div>"+promptRow+"</div>";
 }
+/* never rebuild the list under an open dropdown or mid-typing: the
+   rebuild is what used to swallow the dropdown the instant it opened */
+if(!threadsInteractive()){
 document.getElementById("threads").innerHTML=rows||
-'<div class="card empty">'+L("noThread")+"</div>";
+'<div class="card empty">'+L("noThread")+"</div>"}
 var nb=document.getElementById("newsbox");
 if(nb){nb.scrollTop=nb.scrollHeight}
 }).catch(function(e){
@@ -819,9 +926,28 @@ var why=(e&&e.message==="timeout")?L("errTimeout"):L("errFail");
 document.getElementById("hinfo").innerHTML=
 '<div style="color:var(--danger);font-size:13px">'+L("errConn")+why+L("errHint")+
 "schtasks /Run /TN codex-autoresume</div>"})}
-function setT(id,o){api("/api/threads/"+id,o).then(function(){toast(L("upd"));refresh()})}
+function setT(id,o){api("/api/threads/"+id,o).then(function(r){
+if(r&&r.error){toast(r.error);refresh();return}
+var s=window.__s;
+if(s&&s.threads){for(var i=0;i<s.threads.length;i++){var t=s.threads[i];
+if(t.id!==id)continue;
+if("guard" in o){t.guard=!!o.guard;
+var c=document.getElementById("tc_"+id);if(c)c.classList.toggle("guard",!!o.guard)}
+if("weekly" in o)t.weekly=!!o.weekly;
+if("reset_card" in o)t.reset_card=!!o.reset_card;
+if("model" in o)t.model=o.model;
+if("effort" in o)t.effort=o.effort;
+if("prompt" in o)t.prompt=o.prompt;
+if("priority" in o)t.priority=parseInt(o.priority,10)||0}}
+toast(L("upd"))
+}).catch(function(){toast(L("errFail"))})}
 function resetPrompt(id){api("/api/threads/"+id,{prompt:""}).then(function(){
-toast(L("restored"));refresh()})}
+var el=document.getElementById("pp_"+id.slice(0,8));if(el)el.value="";
+var s=window.__s;
+if(s&&s.threads){for(var i=0;i<s.threads.length;i++){
+if(s.threads[i].id===id)s.threads[i].prompt=""}}
+toast(L("restored"))
+}).catch(function(){toast(L("errFail"))})}
 function togglePause(){var s=window.__s;api("/api/pause",{paused:!s.paused}).then(
 function(){toast(s.paused?L("resumeOK"):L("pauseOK"));refresh()})}
 function applyLang(){
@@ -1034,6 +1160,9 @@ class ControlApi:
                 "effort": tc.get("reasoning_effort") or "",
                 "prompt": tc.get("prompt") or "",
                 "reset_card": bool(tc.get("reset_card")),
+                "priority": (int(t.priority)
+                             if t is not None and t.priority is not None
+                             else int(tc.get("priority") or 0)),
                 # honest run state for NON-goal threads: "running" when a
                 # live turn exists, "waiting" when a guarded thread is
                 # parked on a quota window. Anything else stays unlabeled.
@@ -1215,12 +1344,18 @@ class ControlApi:
             t.guard_prompt = str(payload["prompt"] or "").strip() or None
         if "reset_card" in payload:
             t.guard_reset_card = bool(payload["reset_card"])
+        if "priority" in payload:
+            try:
+                prio = int(payload["priority"])
+            except (TypeError, ValueError):
+                prio = 0
+            t.priority = max(0, prio)
         save_state(st)
         self.daemon._state_mtime = os.path.getmtime(st.state_path)
         return {"thread": thread_id, "guard": t.manual,
                 "weekly": t.guard_weekly, "model": t.guard_model,
                 "effort": t.guard_effort, "prompt": t.guard_prompt,
-                "reset_card": t.guard_reset_card}
+                "reset_card": t.guard_reset_card, "priority": t.priority}
 
 
 def _fmt_ms(ms: int | None) -> str | None:

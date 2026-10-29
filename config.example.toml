@@ -51,6 +51,11 @@ auto_track_max_age_hours = 36
 resume_timeout_sec = 21600      # a resumed turn may legitimately run hours
 max_concurrent_resumes = 2
 
+# A turn you stopped mid-reply (Codex offers "Continue" instead of Send) is
+# picked up after this many quiet seconds and continued through the same
+# RPC the app's Continue button uses - never by sending a prompt.
+stopped_continue_sec = 60
+
 [resume]
 # "exec"  -> headless `codex exec resume` (supports model/effort overrides)
 # "queue" -> `codex queue` (delivered inside the desktop app; keeps the
@@ -100,4 +105,6 @@ plugin_spec = "codex-autoresume-guard@codex-autoresume"
 # mode = "exec"
 # weekly_resume = true           # also resume after weekly-limit resets
 # max_resumes_per_day = 6
+# priority = 0                   # 0 = highest; equal priorities resume together,
+#                                # a lower priority waits for all running work to finish
 # prompt = "Continue the Hermes Alive goal from where it stopped."

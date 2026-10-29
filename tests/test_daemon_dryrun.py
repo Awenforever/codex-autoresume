@@ -38,6 +38,11 @@ FAKE_CODEX = textwrap.dedent("""
                          "title": "bonus"}]}}}
             elif m == "thread/settings/update":
                 resp = {"id": msg["id"], "result": {}}
+            elif m == "thread/resume":
+                resp = {"id": msg["id"], "result": {}}
+            elif m == "turn/start":
+                resp = {"id": msg["id"], "result": {"turn": {
+                    "id": "turn-continued", "status": "inProgress"}}}
             elif m == "thread/goal/set":
                 params = msg.get("params") or {}
                 resp = {"id": msg["id"], "result": {"goal": {
@@ -272,6 +277,46 @@ class TestDaemonCapacityPrompt(_DaemonHarness):
         self.assertEqual(argv[1], "resume")
         self.assertEqual(argv[2], "t-plain-thread")
         self.assertIn("Continue the unfinished task", argv[3])
+
+
+class TestDaemonStoppedTurn(_DaemonHarness):
+    """A tracked conversation whose newest turn is interrupted (Stop button)
+    is continued like the app's Continue button -- no prompt is injected."""
+
+    THREAD_ID = "t-plain-thread"
+    SEED_WATERMARK = True
+
+    def fixture_rows(self, now):
+        turns = [
+            ("t-plain-thread", "turn-stop", "interrupted", None,
+             int(now) - 300, int(now) - 90),
+        ]
+        return turns, None
+
+    def setUp(self):
+        super().setUp()
+        import json as _json
+        with open(os.path.join(self.state_dir, "state.json"), "w",
+                  encoding="utf-8") as f:
+            _json.dump({"version": 1,
+                        "threads": {self.THREAD_ID: {"tracked": True}},
+                        "seen_sources": [],
+                        "turns_watermark": int(self.now) - 7200}, f)
+
+    def test_stopped_turn_is_continued_not_prompted(self):
+        argv_log = os.path.join(self.root, "argv.jsonl")
+        out = self.run_daemon({"FAKE_CODEX_ARGV_LOG": argv_log})
+        self.assertEqual(out.returncode, 0,
+                         msg=(out.stdout + out.stderr)[-3000:])
+        st, t = self.thread_state()
+        self.assertIsNotNone(t)
+        self.assertEqual(t.last_outcome, "continued")
+        self.assertEqual(t.continued_turn_id, "turn-stop")
+        self.assertEqual(t.success_resumes, 1)
+        self.assertEqual(t.resume_count_today, 1)
+        # continue must never go through exec/queue (that would inject a
+        # prompt); the fake records every exec/queue invocation here
+        self.assertFalse(os.path.exists(argv_log))
 
 
 if __name__ == "__main__":

@@ -509,3 +509,50 @@ def goal_continue(codex_bin: str, thread_id: str, model: str | None = None,
             raise
     finally:
         client.close()
+
+
+class TurnBusyError(RateLimitError):
+    """A turn is already running (or the app holds the thread's writer)."""
+
+
+_BUSY_MARKERS = ("active writer", "already in progress", "turn is in progress",
+                 "thread is busy", "thread already loaded", "writer conflict")
+
+
+def _is_busy_error(text: str) -> bool:
+    low = text.lower()
+    return any(m in low for m in _BUSY_MARKERS)
+
+
+def turn_continue(codex_bin: str, thread_id: str, model: str | None = None,
+                  effort: str | None = None) -> dict:
+    """Continue an interrupted turn exactly like the app's Continue button.
+
+    The renderer implements Continue as ``turn/start`` with an EMPTY input
+    array on an idle thread, so this never injects a message. The thread is
+    loaded into a fresh app-server first (a cold thread is not addressable
+    by turn/start). Writer conflicts map to :class:`TurnBusyError`; quota
+    and capacity errors stay :class:`RateLimitError` and are classified by
+    the caller.
+    """
+    client = AppServerClient(codex_bin)
+    try:
+        try:
+            client._rpc("thread/resume", {"threadId": thread_id}, timeout=60)
+        except RateLimitError as e:
+            if _is_busy_error(str(e)):
+                raise TurnBusyError(str(e)) from None
+            raise
+        params: dict = {"threadId": thread_id, "input": []}
+        if model:
+            params["model"] = model
+        if effort:
+            params["effort"] = effort
+        try:
+            return client._rpc("turn/start", params)
+        except RateLimitError as e:
+            if _is_busy_error(str(e)):
+                raise TurnBusyError(str(e)) from None
+            raise
+    finally:
+        client.close()

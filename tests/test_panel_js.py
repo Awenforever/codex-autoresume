@@ -520,6 +520,101 @@ class PanelUpdateUiTest(unittest.TestCase):
             self.assertEqual(PANEL_HTML.count(key + ':'), 2, key)
 
 
+class PanelDropdownTest(unittest.TestCase):
+    """Native <select> is gone; the custom menu must survive the 15s poll."""
+
+    def test_no_native_select_left(self):
+        from codex_autoresume.control import PANEL_HTML
+        self.assertNotIn("<select", PANEL_HTML)
+        self.assertNotIn("</select>", PANEL_HTML)
+        self.assertNotIn("modelOpts", PANEL_HTML)
+        self.assertNotIn("<datalist", PANEL_HTML)
+        for token in (".ddbtn{", ".ddmenu{", ".ddopt{", ".dd.open .ddmenu{",
+                      "function ddToggle(", "function ddPick("):
+            self.assertIn(token, PANEL_HTML)
+
+    def test_refresh_never_rebuilds_under_open_menu_or_typing(self):
+        from codex_autoresume.control import PANEL_HTML
+        js = _panel_js()
+        self.assertIn('b.querySelector(".dd.open")', js)
+        self.assertIn('a.tagName==="INPUT"', js)
+        self.assertIn("if(!threadsInteractive()){", js)
+        # the guarded assignment is the one that writes the rows
+        body = _fn(js, "refresh")
+        self.assertIn("threadsInteractive()", body)
+
+    def test_setT_patches_in_place_without_full_refresh(self):
+        js = _panel_js()
+        body = _fn(js, "setT")
+        self.assertNotIn('toast(L("upd"));refresh()', body)
+        self.assertIn('classList.toggle("guard"', body)
+        self.assertIn('if("priority" in o)', body)
+
+    def test_priority_control_is_compact_and_bilingual(self):
+        from codex_autoresume.control import PANEL_HTML
+        self.assertIn("ddPick(this,\\'priority\\')", PANEL_HTML)
+        self.assertIn('class="ctl dd prio', PANEL_HTML)
+        self.assertIn('L("tipPrio")', PANEL_HTML)
+        for key in ("tipPrio", "prioTop", "contOK"):
+            self.assertEqual(PANEL_HTML.count(key + ":"), 2, key)
+
+    def test_dd_pick_sets_value_label_and_payload(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not installed")
+        js = _panel_js()
+        harness = _fn(js, "ddPick") + r"""
+function El(cls){
+ this.className=cls;
+ this._cls=cls.split(" ");
+ var self=this;
+ this.classList={
+  contains:function(c){return self._cls.indexOf(c)>=0},
+  add:function(c){if(self._cls.indexOf(c)<0)self._cls.push(c)},
+  remove:function(c){self._cls=self._cls.filter(function(x){return x!==c})},
+  toggle:function(c,on){on?this.add(c):this.remove(c)}};
+ this.attrs={};this.children=[];this.textContent="";
+}
+El.prototype.getAttribute=function(k){return this.attrs[k]};
+El.prototype.setAttribute=function(k,v){this.attrs[k]=v};
+El.prototype.closest=function(sel){
+ var n=this;var want=sel.replace(".","");
+ while(n){if(n.classList&&n.classList.contains(want))return n;n=n.parentNode}
+ return null};
+El.prototype.querySelector=function(sel){
+ var self=this;var out=null;
+ (function walk(n){if(out)return;if(n!==self&&n.classList&&
+   n.classList.contains(sel.replace(".",""))){out=n;return}
+  (n.children||[]).forEach(walk)})(self);
+ return out};
+El.prototype.querySelectorAll=function(sel){
+ var self=this;var out=[];
+ (function walk(n){if(n!==self&&n.classList&&
+   n.classList.contains(sel.replace(".",""))){out.push(n)}
+  (n.children||[]).forEach(walk)})(self);
+ return out};
+var dd=new El("dd open"),menu=new El("ddmenu"),btn=new El("ddbtn");
+var o0=new El("ddopt sel"),o2=new El("ddopt");
+o0.setAttribute("data-v","0");o0.setAttribute("data-l","P0");o0.textContent="✓P0";
+o2.setAttribute("data-v","2");o2.setAttribute("data-l","P2");o2.textContent="✓P2";
+dd.setAttribute("data-tid","t1");btn.textContent="P0";
+dd.children=[btn,menu];menu.children=[o0,o2];
+btn.parentNode=dd;menu.parentNode=dd;o0.parentNode=menu;o2.parentNode=menu;
+var payload=null;
+function setT(id,o){payload={id:id,o:o}}
+ddPick(o2,"priority");
+console.log(JSON.stringify({payload:payload,label:btn.textContent,
+ open:dd.classList.contains("open"),sel0:o0.classList.contains("sel"),
+ sel2:o2.classList.contains("sel")}));
+"""
+        got = _run_node(harness)
+        self.assertEqual(got["payload"], {"id": "t1", "o": {"priority": "2"}})
+        self.assertEqual(got["label"], "P2")
+        self.assertFalse(got["open"])
+        self.assertFalse(got["sel0"])
+        self.assertTrue(got["sel2"])
+
+
 class PanelUpdateCheckTest(unittest.TestCase):
     """Logo click: red dot opens the modal, otherwise force a fresh check."""
 

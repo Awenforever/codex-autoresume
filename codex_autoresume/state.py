@@ -32,6 +32,14 @@ class ThreadState:
     # allow auto-consuming an official reset credit when the weekly window
     # is exhausted (financial-ish action: strictly opt-in per thread)
     guard_reset_card: bool | None = None
+    # scheduling priority: 0 = highest. Same priority resumes together; a
+    # lower priority waits while a higher-priority guarded task is running.
+    # None = use config [threads] value (or the default 0).
+    priority: int | None = None
+    # newest interrupted turn we tried to continue (user pressed Stop, app
+    # quit) and how many consecutive attempts failed for that same turn
+    continued_turn_id: str | None = None
+    continue_fails: int = 0
     last_kind: str = ""                 # last interruption kind
     last_reset_at: str | None = None    # ISO
     next_wake_iso: str | None = None

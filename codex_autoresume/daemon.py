@@ -21,7 +21,8 @@ from .planner import (RETRY_BACKOFF_CAP_SEC, plan_for_thread,
                       pick_fallback_model, merge_settings)
 from .ratelimits import AppServerClient, QuotaSnapshot, RateLimitError
 from .resume import (ResumeOutcome, build_exec_resume_command,
-                     build_probe_command, build_queue_command, run_command)
+                     build_probe_command, build_queue_command,
+                     classify_output, run_command)
 from .state import InstanceLock, WatcherState, load_state, save_state
 
 log = logging.getLogger("codex-autoresume")
@@ -47,6 +48,10 @@ def _now() -> datetime:
 # a resume can never land on the wrong side of the reset and append another
 # limit message to the conversation.
 LIMIT_GRACE = timedelta(seconds=60)
+
+# how many times one interrupted turn may be retried before the guard leaves
+# it alone; a NEW interrupted turn (different turn id) resets the counter
+CONTINUE_MAX_FAILS = 3
 
 
 def _today(now: datetime | None = None) -> str:
@@ -267,8 +272,20 @@ class Daemon:
                                   if t.last_kind == "server_overloaded"
                                   else "quota_wait")
 
+        # newest interrupted turns on guarded threads (user pressed Stop, or
+        # the app quit mid-turn): continued exactly like the app's Continue
+        # button -- never by injecting a prompt
+        stopped: dict[str, object] = {}
+        try:
+            stopped = {s.thread_id: s for s in codex.stopped_turns(
+                min_age_sec=float(
+                    self.cfg["general"]["stopped_continue_sec"]))}
+        except Exception as e:
+            log.warning("stopped-turn scan failed: %s", e)
+
         # re-derive wake times for tracked threads every tick (config may
         # change; snapshot reset times may arrive later)
+        jobs = []       # (priority, kind, thread_id, state, decision, info, stopped)
         for thread_id, t in list(self.state.threads.items()):
             if not t.tracked or t.last_kind == "":
                 continue
@@ -284,7 +301,7 @@ class Daemon:
                 info = codex.thread(thread_id)
             except CodexEnvError:
                 info = None
-            tc = thread_config(self.cfg, thread_id)
+            tc = self._effective_thread_config(thread_id, t)
             decision = plan_for_thread(
                 event, t, self.cfg, tc,
                 thread_last_update_ms=(info.updated_at_ms if info else 0),
@@ -310,7 +327,33 @@ class Daemon:
                     # to retry first: walk the configured fallback chain
                     decision.model = self._capacity_model(
                         thread_id, t, decision.model)
-                self._launch_resume(thread_id, t, decision, info)
+                jobs.append((self._priority_of(thread_id, t, tc), 0,
+                             thread_id, t, decision, info, None))
+
+        # stopped-turn candidates: guarded, non-goal threads with no quota
+        # interruption already waiting. Only the newest turn counts, so a
+        # conversation continued by the user is never touched again.
+        if self._active_limit() is None:
+            for tid, s in stopped.items():
+                th = self.state.threads.get(tid)
+                if th is None or not th.tracked or th.is_goal:
+                    continue
+                if th.last_kind:
+                    # a quota/capacity interruption owns this thread; when
+                    # it resumes, the latest turn is no longer interrupted
+                    continue
+                if tid in busy or tid in self._inflight:
+                    continue
+                if th.continued_turn_id != s.turn_id:
+                    th.continue_fails = 0     # a different stopped turn
+                elif th.continue_fails >= CONTINUE_MAX_FAILS:
+                    continue
+                elif self._wake_in_future(th):
+                    continue
+                jobs.append((self._priority_of(tid, th), 1, tid, th,
+                             None, None, s))
+
+        self._launch_jobs(jobs, busy)
 
         # warm slow external caches off the HTTP path: /api/status serves
         # cache-only, so the panel can never hang on external fetches
@@ -1087,15 +1130,18 @@ class Daemon:
                 cur.guard_effort = ts.guard_effort
                 cur.guard_prompt = ts.guard_prompt
                 cur.guard_reset_card = ts.guard_reset_card
+                cur.priority = ts.priority
                 if not ts.tracked and cur.tracked:
                     log.info("unwatched %s via CLI", tid[:8])
                 cur.tracked = ts.tracked
 
     # -------------------------------------------------------------- resumes
 
-    def _launch_resume(self, thread_id: str, t, decision, info) -> None:
+    def _launch_resume(self, thread_id: str, t, decision, info) -> bool:
+        """Returns True when the resume was submitted (the priority gate
+        treats a submitted resume as an active high-priority task)."""
         if self._update_started:
-            return
+            return False
         # send-time recheck: an interruption may have established a window
         # limit while this decision was being made
         lim = self._active_limit()
@@ -1105,11 +1151,11 @@ class Daemon:
                      "(interruption evidence)", thread_id[:8], window,
                      until.isoformat(timespec="seconds"))
             t.next_wake_iso = until.isoformat()
-            return
+            return False
         with self._inflight_lock:
             if thread_id in self._inflight:
                 log.debug("%s resume already in flight", thread_id[:8])
-                return
+                return False
             self._inflight[thread_id] = time.monotonic()
         g = self.cfg["general"]
         if decision.kind == "server_overloaded":
@@ -1123,17 +1169,225 @@ class Daemon:
                         thread_id[:8])
             with self._inflight_lock:
                 self._inflight.pop(thread_id, None)
-            return
+            return False
         elif not t.bump_resume_counter(_today(), self._thread_cap(thread_id)):
             log.warning("per-thread daily cap reached for %s", thread_id[:8])
             with self._inflight_lock:
                 self._inflight.pop(thread_id, None)
-            return
+            return False
         t.last_resume_iso = _now().isoformat()
         log.info("resuming %s (%s, model=%s effort=%s mode=%s)", thread_id[:8],
                  decision.reason, decision.model, decision.reasoning_effort,
                  decision.mode)
         self._resume_pool.submit(self._do_resume, thread_id, decision)
+        return True
+
+    def _priority_of(self, thread_id: str, t=None, tc=None) -> int:
+        """Scheduling priority, 0 = highest.
+
+        Panel/state override wins over the config [threads] value; the
+        default is 0, so unconfigured conversations behave exactly as
+        before (everything resumes together).
+        """
+        if t is None:
+            t = self.state.threads.get(thread_id)
+        if t is not None and t.priority is not None:
+            return max(0, int(t.priority))
+        if tc is None:
+            tc = self._effective_thread_config(thread_id, t)
+        prio = tc.get("priority")
+        return max(0, int(prio)) if prio is not None else 0
+
+    def _wake_in_future(self, t) -> bool:
+        if not t.next_wake_iso:
+            return False
+        try:
+            return datetime.fromisoformat(t.next_wake_iso) > _now()
+        except ValueError:
+            return False
+
+    def _launch_jobs(self, jobs, busy) -> None:
+        """Launch due work through the priority gate.
+
+        Same priority launches together; while a higher-priority guarded
+        conversation is running (live turn, in-flight resume, or a resume
+        submitted earlier in this tick) lower priorities wait. Only work
+        actually RUNNING gates: a high-priority thread waiting on its quota
+        must not starve the rest.
+        """
+        active: set[int] = set()
+        with self._inflight_lock:
+            inflight = set(self._inflight)
+        for tid in busy | inflight:
+            th = self.state.threads.get(tid)
+            if th is not None and (th.tracked or th.manual):
+                active.add(self._priority_of(tid, th))
+        gate = min(active) if active else None
+
+        for prio, kind, thread_id, t, decision, info, stopped in sorted(
+                jobs, key=lambda j: (j[0], j[1])):
+            if gate is not None and prio > gate:
+                log.info("%s (P%d) held back: higher-priority guard P%d "
+                         "is active", thread_id[:8], prio, gate)
+                continue
+            if kind == 0:
+                ok = self._launch_resume(thread_id, t, decision, info)
+            else:
+                ok = self._launch_continue(thread_id, t, stopped)
+            if ok:
+                gate = prio if gate is None else min(gate, prio)
+
+    def _launch_continue(self, thread_id: str, t, stopped) -> bool:
+        """Continue a stopped turn like the app's Continue button would.
+
+        Stop button / app quit mid-turn leaves the newest turn
+        ``interrupted``; the app then shows Continue (play) instead of
+        Send. We never inject a prompt there -- only thread/resume +
+        turn/start with an empty input, which is the protocol twin of
+        that button.
+        """
+        if self._update_started:
+            return False
+        lim = self._active_limit()
+        if lim is not None:
+            return False
+        with self._inflight_lock:
+            if thread_id in self._inflight:
+                return False
+            self._inflight[thread_id] = time.monotonic()
+        g = self.cfg["general"]
+        if not self.state.bump_global_counter(_today(),
+                                              g["max_resumes_per_day"]):
+            log.warning("global daily resume cap reached; not continuing %s",
+                        thread_id[:8])
+            with self._inflight_lock:
+                self._inflight.pop(thread_id, None)
+            return False
+        if not t.bump_resume_counter(_today(), self._thread_cap(thread_id)):
+            log.warning("per-thread daily cap reached for %s", thread_id[:8])
+            with self._inflight_lock:
+                self._inflight.pop(thread_id, None)
+            return False
+        t.continued_turn_id = stopped.turn_id
+        t.last_resume_iso = _now().isoformat()
+        log.info("continuing stopped turn %s of %s",
+                 stopped.turn_id[:8], thread_id[:8])
+        self._resume_pool.submit(self._do_continue, thread_id, stopped.turn_id)
+        return True
+
+    def _do_continue(self, thread_id: str, turn_id: str) -> None:
+        try:
+            t = self.state.thread(thread_id)
+            if self.cfg["general"]["dry_run"]:
+                log.info("[dry-run] would continue stopped turn %s of %s",
+                         turn_id[:8], thread_id[:8])
+                t.append_history({"at": _now().isoformat(),
+                                  "kind": "dry_run_skipped", "ok": None})
+                t.last_outcome = "dry_run_skipped"
+                save_state(self.state)
+                return
+            lim = self._active_limit()
+            if lim is not None:
+                window, until = lim
+                log.info("%s continue deferred in worker: %s window empty "
+                         "until %s", thread_id[:8], window,
+                         until.isoformat(timespec="seconds"))
+                t.next_wake_iso = until.isoformat()
+                save_state(self.state)
+                return
+            from .ratelimits import TurnBusyError, turn_continue
+            try:
+                # no model/effort override: the app's Continue button keeps
+                # the conversation's own settings, and so do we
+                turn_continue(self.codex_bin, thread_id)
+            except TurnBusyError as e:
+                # the app owns the thread: click its own Continue button
+                if self._uia_turn_continue(thread_id, turn_id, t):
+                    return
+                t.last_outcome = "writer_busy"
+                t.next_wake_iso = (_now() + timedelta(
+                    seconds=RETRY_BACKOFF_CAP_SEC)).isoformat()
+                log.info("continue %s has an active writer (app owns it); "
+                         "recheck in 3 min", thread_id[:8])
+                save_state(self.state)
+                return
+            except (RateLimitError, OSError) as e:
+                outcome = classify_output(1, str(e), "")
+                if outcome.kind in ("usage_limit", "overloaded"):
+                    # quota/capacity is not this turn's failure: route it
+                    # through the regular interruption bookkeeping so the
+                    # window evidence and backoff stay consistent
+                    self._record(thread_id, outcome, None)
+                else:
+                    t.continue_fails += 1
+                    t.last_error = "continue_error"
+                    t.append_history({"at": _now().isoformat(),
+                                      "kind": "continue_error", "ok": False,
+                                      "error_tail": str(e)[:400]})
+                    t.next_wake_iso = (_now() + timedelta(
+                        seconds=RETRY_BACKOFF_CAP_SEC)).isoformat()
+                    log.warning("continue %s failed (%s); retrying in 3 min",
+                                thread_id[:8], e)
+                    save_state(self.state)
+                return
+            self._record(thread_id, ResumeOutcome(ok=True, kind="continued",
+                                                  exit_code=0), None)
+            log.info("continued stopped turn %s of %s",
+                     turn_id[:8], thread_id[:8])
+        except Exception:
+            log.exception("continue worker crashed for %s", thread_id)
+        finally:
+            with self._inflight_lock:
+                self._inflight.pop(thread_id, None)
+
+    def _uia_turn_continue(self, thread_id: str, turn_id: str, t) -> bool:
+        """Writer held by the app: click its own Continue button (UIA).
+
+        Fires only when exactly one guarded non-goal thread has a stopped
+        turn, so the visible button cannot belong to a different
+        conversation. Success is VERIFIED by the interrupted turn actually
+        losing its ``interrupted`` status.
+        """
+        if not self.cfg["general"].get("uia_resume", True):
+            return False
+        try:
+            stopped = CodexState(self.codex_home).stopped_turns()
+            cands = [s.thread_id for s in stopped
+                     if ((th := self.state.threads.get(s.thread_id))
+                         is not None and th.tracked and not th.is_goal)]
+            if cands != [thread_id]:
+                log.info("uia turn continue skipped: %d stopped candidates "
+                         "(ambiguous)", len(cands))
+                return False
+            from .uia import click_continue
+            res = click_continue(["Continue", "继续", "Resume", "恢复"])
+            if not res.get("clicked"):
+                log.info("uia Continue (turn) not clickable: %s",
+                         res.get("detail"))
+                return False
+            time.sleep(3)
+            still = {s.thread_id: s.turn_id
+                     for s in CodexState(self.codex_home).stopped_turns()}
+            if still.get(thread_id) == turn_id:
+                log.info("uia click did not continue %s; busy",
+                         thread_id[:8])
+                return False
+            t.append_history({"at": _now().isoformat(),
+                              "kind": "uia_continue", "ok": True,
+                              "detail": str(res.get("detail"))[:200]})
+            t.success_resumes += 1
+            t.last_outcome = "uia_continue"
+            t.continue_fails = 0
+            t.fail_streak = 0
+            t.next_wake_iso = None
+            log.info("%s continued via the app's own Continue button (%s)",
+                     thread_id[:8], res.get("detail"))
+            self._notify(thread_id, "uia_continue")
+            save_state(self.state)
+            return True
+        except Exception:
+            log.exception("uia turn continue failed")
+            return False
 
     def _thread_cap(self, thread_id: str) -> int:
         tc = thread_config(self.cfg, thread_id)

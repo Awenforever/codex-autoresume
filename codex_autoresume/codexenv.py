@@ -120,6 +120,18 @@ class ThreadInfo:
     name: str | None = None
 
 
+@dataclass
+class StoppedTurn:
+    """A thread whose NEWEST turn was interrupted (Stop button / app quit).
+
+    Not a quota failure: status is ``interrupted`` and error_json is empty.
+    A thread continued afterwards has a newer turn and is never reported.
+    """
+    thread_id: str
+    turn_id: str
+    stopped_at: int | None          # unix seconds when the stop was recorded
+
+
 class CodexState:
     """Read-only view over the Codex state databases."""
 
@@ -243,6 +255,49 @@ class CodexState:
         if not row:
             return None
         return ThreadInfo(*row)
+
+    def stopped_turns(self, min_age_sec: float = 0) -> list[StoppedTurn]:
+        """Threads whose newest turn is interrupted, newer than *min_age_sec*.
+
+        Only the latest row per thread counts (max rowid = latest started
+        turn): a thread that was continued afterwards has a newer turn and
+        must not be touched. Thread ids are canonicalized through
+        :meth:`rollout_alias_map` so a continuation id never looks like a
+        second stopped conversation.
+        """
+        import time as _time
+        aliases = self.rollout_alias_map()
+        con = _connect_ro(self._history_db)
+        try:
+            rows = con.execute(
+                "SELECT t.thread_id, t.turn_id, t.status, t.started_at, "
+                "t.completed_at, "
+                "(SELECT MAX(i.created_at_ms) FROM thread_items i "
+                " WHERE i.thread_id = t.thread_id) AS last_item_ms "
+                "FROM thread_turns t WHERE t.rowid IN "
+                "(SELECT MAX(rowid) FROM thread_turns GROUP BY thread_id)"
+            ).fetchall()
+        finally:
+            con.close()
+        now = _time.time()
+        out: list[StoppedTurn] = []
+        seen: set[str] = set()
+        for thread_id, turn_id, status, started_at, completed_at, last_item_ms in rows:
+            if status != "interrupted":
+                continue
+            stopped = (completed_at
+                       or (last_item_ms / 1000 if last_item_ms else None)
+                       or started_at)
+            if stopped is not None and now - stopped < min_age_sec:
+                continue
+            tid = aliases.get(thread_id.lower(), thread_id)
+            if tid in seen:
+                continue
+            seen.add(tid)
+            out.append(StoppedTurn(
+                thread_id=tid, turn_id=turn_id,
+                stopped_at=int(stopped) if stopped is not None else None))
+        return out
 
     def list_threads(self, include_archived: bool = False,
                      limit: int = 100) -> list[ThreadInfo]:

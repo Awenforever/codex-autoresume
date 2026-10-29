@@ -187,5 +187,61 @@ class TestDetect(unittest.TestCase):
         self.assertIsNone(state.thread("nope"))
 
 
+class TestStoppedTurns(unittest.TestCase):
+    """Newest interrupted turn per thread == the app's Continue button case."""
+
+    CHAIN = "01a12031-439c-7400-b550-891b01130506"
+
+    def setUp(self):
+        import time
+        now = int(time.time())
+        turns = [
+            # user stopped turn-a, then continued it (turn-b completed):
+            # the thread must NOT be reported any more
+            ("t-done", "turn-a", "interrupted", None, now - 300, now - 290),
+            ("t-done", "turn-b", "completed", None, now - 280, now - 270),
+            # stopped and never continued
+            ("t-stop", "turn-c", "interrupted", None, now - 200, now - 190),
+            # quota failure is NOT a stop
+            ("t-quota", "turn-d", "failed",
+             err_payload("usageLimitExceeded", "usage limit"),
+             now - 180, now - 170),
+            # stopped a moment ago: still inside the settle window
+            ("t-fresh", "turn-e", "interrupted", None, now - 5, None),
+            # turn recorded under a continuation id
+            (self.CHAIN, "turn-f", "interrupted", None, now - 150, now - 140),
+        ]
+        threads = [
+            ("t-chain",
+             "rollout-2026-10-09T18-24-21-t-chain_%s.jsonl" % self.CHAIN,
+             1, 1, "user", "openai", "/w", "title", "read-only", "never",
+             0, 1, 0, "m", "low", now * 1000, "n"),
+        ]
+        self.home = build_codex_home(tempfile.mkdtemp(prefix="cxr-stop-"),
+                                     turns=turns, threads=threads)
+
+    def test_only_newest_interrupted_turn_counts(self):
+        from codex_autoresume.codexenv import CodexState
+        got = {s.thread_id: s for s in CodexState(self.home).stopped_turns()}
+        self.assertEqual(set(got), {"t-stop", "t-fresh", "t-chain"})
+        self.assertEqual(got["t-stop"].turn_id, "turn-c")
+        self.assertNotIn("t-done", got)
+        self.assertNotIn("t-quota", got)
+        self.assertEqual(got["t-chain"].turn_id, "turn-f")
+
+    def test_settle_window_skips_just_stopped(self):
+        from codex_autoresume.codexenv import CodexState
+        got = {s.thread_id for s in
+               CodexState(self.home).stopped_turns(min_age_sec=60)}
+        self.assertEqual(got, {"t-stop", "t-chain"})
+
+    def test_stopped_at_uses_completion_time(self):
+        import time
+        from codex_autoresume.codexenv import CodexState
+        got = {s.thread_id: s for s in CodexState(self.home).stopped_turns()}
+        stopped = got["t-stop"].stopped_at
+        self.assertLess(abs(stopped - (int(time.time()) - 190)), 5)
+
+
 if __name__ == "__main__":
     unittest.main()

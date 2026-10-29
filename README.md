@@ -53,6 +53,13 @@ Codex Guard does that for you, and it does it the way you would:
   `thread/goal/set` API. It **never** injects fake chat messages.
 - **Per-resume model & reasoning.** Each conversation can pin its own
   model and reasoning effort for every automatic resume, or inherit.
+- **Stopped turns pick themselves back up.** Stopped a reply halfway and
+  Codex switched Send to **Continue**? Guard notices the interrupted turn
+  and continues it through the same RPC the button uses — never by sending
+  a prompt into your conversation.
+- **Priorities, like network metrics.** Give each conversation a priority
+  (0 = highest, the default). Equal priorities resume together; a lower
+  one waits until the running higher-priority work has finished.
 - **Weekly quota guard + reset credits.** Optionally keeps a goal alive
   across the weekly reset, and can spend an official reset credit
   automatically when the weekly quota runs dry (opt-in per thread).
@@ -196,6 +203,7 @@ Optional `~/.codex-autoresume/config.toml` (copy
 [general]
 poll_interval_sec = 50      # daemon heartbeat
 weekly_resume = "off"       # off | per-thread | all
+stopped_continue_sec = 60   # quiet seconds before a stopped turn continues
 
 [resume]
 mode = "exec"               # "queue" delivers into the desktop app instead
@@ -257,6 +265,8 @@ ChatGPT 的额度限制（5 小时窗口 / 周额度）打断 Codex 任务时，
 - **真正的无人值守。** 自动检测中断、等待额度窗口、恢复任务——普通对话和 `/goal` 都支持；守护重启不丢状态，每次恢复都会验证结果。
 - **goal 用官方方式继续。** 桌面应用占用会话时，通过 UI 自动化点击应用自己的 **Resume goal** 按钮（等价于你亲手点）；未占用时走官方 `thread/goal/set` 接口。**绝不**注入伪造的聊天消息。
 - **每次恢复可指定模型与推理强度。** 每个会话可固定自动恢复时的 model / reasoning，也可继承线程设置。
+- **被你中途停掉的回复会自动接上。** 回复中途点了停止、按钮翻成「继续」？守护能识别被打断的回合，并用与应用「继续」按钮相同的 RPC 继续任务——绝不像发消息那样往对话里注入 prompt。
+- **优先级，像 Windows 网络跃迁。** 每个会话可设优先级（0 最高，也是默认）：同优先级同时恢复，低优先级要等高优先级的任务跑完才继续。
 - **周额度守护 + 重置卡。** 可选择让 goal 跨越周重置继续跑；周额度耗尽且账户有官方重置卡时可自动消耗（按会话开启）。
 - **值得打开的控制面板。** 深色 / 浅色双主题（跟随系统、记忆选择）、中英双语、双模拟时钟（本机 + 太平洋时间）、压力渐变的额度环、官方重置预告 / 实测到账 / 多源 Tibo 动态日志（重置追踪站 + 两个 X 镜像，每 2 分钟刷新）——挂在 `127.0.0.1:8765`，不消耗额度。
 - **面板里一键自更新。** 守护每天检查一次 GitHub 最新 release；有新版时 logo 右上角出现小红点——点开确认后自行更新并重启（源码检出走快进 `git pull`，pip 安装走 `pip install -U`），面板自动重连。没有红点时点击 logo 会立即重新检查，不必等每日检查。
