@@ -550,6 +550,17 @@ class PanelDropdownTest(unittest.TestCase):
         self.assertIn('classList.toggle("guard"', body)
         self.assertIn('if("priority" in o)', body)
 
+    def test_hover_highlight_is_accent_tinted(self):
+        from codex_autoresume.control import PANEL_HTML
+        m = re.search(r"\.ddopt:hover[^{]*\{([^}]*)\}", PANEL_HTML, re.S)
+        self.assertTrue(m, "no .ddopt:hover rule")
+        body = m.group(1)
+        # --glass-btn is near-white in the light theme, so hovering looked
+        # identical to the menu surface; the highlight must be an accent tint.
+        self.assertNotIn("--glass-btn", body)
+        self.assertIn("rgba(var(--accent-rgb),.11)", body)
+        self.assertIn("rgba(var(--accent-rgb),.36)", body)
+
     def test_priority_control_is_compact_and_bilingual(self):
         from codex_autoresume.control import PANEL_HTML
         self.assertIn("ddPick(this,\\'priority\\')", PANEL_HTML)

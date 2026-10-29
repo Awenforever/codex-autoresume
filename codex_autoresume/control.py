@@ -343,7 +343,9 @@ backdrop-filter:blur(18px) saturate(160%)}
 @keyframes ddIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
 .ddopt{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--fg);
 padding:5px 8px;border-radius:7px;cursor:pointer;white-space:nowrap}
-.ddopt:hover,.ddopt:focus{background:var(--glass-btn);outline:none}
+.ddopt:hover,.ddopt:focus{outline:none;
+background:rgba(var(--accent-rgb),.11);
+box-shadow:inset 0 0 0 1px rgba(var(--accent-rgb),.36)}
 .ddopt .ck{width:11px;flex:none;color:var(--accent);font-size:11px;
 visibility:hidden}
 .ddopt.sel .ck{visibility:visible}
