@@ -54,9 +54,10 @@ class PanelToastContrastTest(unittest.TestCase):
         css = re.search(r"<style>(.*?)</style>", PANEL_HTML, re.S).group(1)
         toast = re.search(r"#toast\{([^}]*)\}", css, re.S).group(1)
         self.assertIn("color:var(--toast-fg)", toast)
-        for name, selector in (("dark", ":root"), ("light", "body.light")):
+        self.assertIn("background:var(--toast-bg)", toast)
+        for name, selector in (("dark", ":root"), ("light", "html.light,body.light")):
             palette = self._block(css, selector)
-            fg, bg = palette["--toast-fg"], palette["--accent-soft"]
+            fg, bg = palette["--toast-fg"], palette["--toast-bg"]
             l1, l2 = self._lum(fg), self._lum(bg)
             ratio = (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
             self.assertGreaterEqual(

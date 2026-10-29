@@ -302,7 +302,7 @@ class TestPlanner(unittest.TestCase):
 
     def test_overloaded_waits_between_attempts(self):
         # an attempt 60s ago is still inside the per-thread minimum spacing
-        # (300s here), which wins over the shorter capacity backoff
+        # (180s here), which wins over the shorter capacity backoff
         t = ThreadState(tracked=True,
                         last_resume_iso=(self.now - timedelta(seconds=60)).isoformat())
         d = plan_for_thread(self.event("server_overloaded"),
@@ -314,18 +314,21 @@ class TestPlanner(unittest.TestCase):
         self.assertGreaterEqual(d.wake_at,
                                 self.now + timedelta(seconds=100))
 
-    def test_overloaded_backs_off_exponentially(self):
-        # streak 4 -> 180s * 2^3 = 24 min between attempts
-        t = ThreadState(tracked=True, overload_streak=4,
-                        last_resume_iso=(self.now - timedelta(seconds=300)).isoformat())
+    def test_overloaded_backoff_is_capped_at_three_minutes(self):
+        # base 60s * 2^4 = 16 min uncapped; the retry ceiling is 3 minutes
+        cfg = base_cfg(**{"general.min_resume_interval_sec": 30,
+                          "general.server_overloaded_cooldown_sec": 60})
+        t = ThreadState(tracked=True, overload_streak=5,
+                        last_resume_iso=(self.now - timedelta(seconds=30)).isoformat())
         d = plan_for_thread(self.event("server_overloaded"),
-                            t, base_cfg(), {},
+                            t, cfg, {},
                             thread_last_update_ms=int(self.now.timestamp() * 1000),
                             busy=False, now=self.now, snapshot=None,
                             today=self.now.strftime("%Y-%m-%d"))
         self.assertEqual(d.action, "wait")
-        self.assertGreaterEqual(d.wake_at,
-                                self.now + timedelta(seconds=1000))
+        # capped cooldown 180s minus 30s already elapsed
+        self.assertEqual(d.wake_at,
+                         self.now + timedelta(seconds=150))
 
     def test_overloaded_quota_gate_still_applies(self):
         snap = QuotaSnapshot(ordinary_usage_allowed=False,
@@ -352,7 +355,8 @@ class TestPlanner(unittest.TestCase):
         self.assertEqual(d.action, "due")
 
     def test_overloaded_wait_follows_capacity_backoff(self):
-        # the base retry spacing is 180s even when min_resume_interval is low
+        # capacity retries are spaced by the 180s cooldown even when
+        # min_resume_interval is lower
         cfg = base_cfg(**{"general.min_resume_interval_sec": 30})
         t = ThreadState(tracked=True, overload_streak=2,
                         last_resume_iso=(self.now - timedelta(seconds=60)).isoformat())
@@ -362,8 +366,9 @@ class TestPlanner(unittest.TestCase):
                             busy=False, now=self.now, snapshot=None,
                             today=self.now.strftime("%Y-%m-%d"))
         self.assertEqual(d.action, "wait")
-        self.assertGreaterEqual(d.wake_at,
-                                self.now + timedelta(seconds=250))
+        # 180s cooldown minus 60s already elapsed
+        self.assertEqual(d.wake_at,
+                         self.now + timedelta(seconds=120))
 
     def test_settings_precedence(self):
         cfg = base_cfg(**{"resume.model": "global-model",

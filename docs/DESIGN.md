@@ -121,8 +121,8 @@ detect (read-only sqlite)  ──▶  planner (pure logic)  ──▶  daemon lo
   ("Selected model is at capacity") parks goals and fails resume attempts,
   but says nothing about the task itself. Both paths keep retrying — goals
   via the official `thread/goal/set` continue, ordinary threads via the
-  continue prompt — with exponential backoff (3m → 48m) seeded by
-  `general.server_overloaded_cooldown_sec`, rotating
+  continue prompt — with exponential backoff capped at 3 minutes and seeded
+  by `general.server_overloaded_cooldown_sec`, rotating
   `general.fallback_models` away from the model that just failed. These
   retries never consume the daily resume budgets nor the failure streak
   that parks a thread.

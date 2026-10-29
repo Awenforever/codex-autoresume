@@ -17,7 +17,8 @@ from .codexenv import CodexEnvError, CodexState, find_codex_bin
 from .config import (ConfigError, load_config, resolve_codex_home,
                      resolve_state_dir, thread_config)
 from .detect import detect
-from .planner import plan_for_thread, pick_fallback_model, merge_settings
+from .planner import (RETRY_BACKOFF_CAP_SEC, plan_for_thread,
+                      pick_fallback_model, merge_settings)
 from .ratelimits import AppServerClient, QuotaSnapshot, RateLimitError
 from .resume import (ResumeOutcome, build_exec_resume_command,
                      build_probe_command, build_queue_command, run_command)
@@ -1330,13 +1331,13 @@ class Daemon:
             # the app's own Continue button (user-approved UI automation)
             if self._uia_goal_continue(thread_id, t):
                 return True
-            # stand down quietly. Back off exponentially so a held writer
-            # does not keep spawning app-servers every poll.
+            # stand down quietly. Back off 1m, 2m, then every 3 min (cap)
+            # so a held writer does not keep spawning app-servers every poll.
             bo = getattr(self, "_goal_busy_backoff", None)
             if bo is None:
                 bo = self._goal_busy_backoff = {}
             prev = bo.get(thread_id, 0)
-            wait = 300 if prev < 300 else min(1800, prev * 2)
+            wait = 60 if prev < 60 else min(RETRY_BACKOFF_CAP_SEC, prev * 2)
             bo[thread_id] = wait
             t.last_outcome = "writer_busy"
             t.next_wake_iso = (_now() + timedelta(seconds=wait)).isoformat()
@@ -1351,9 +1352,10 @@ class Daemon:
             t.append_history({"at": _now().isoformat(),
                               "kind": "goal_continue_error", "ok": False,
                               "error_tail": str(e)[:400]})
-            t.next_wake_iso = (_now() + timedelta(minutes=10)).isoformat()
+            t.next_wake_iso = (_now() + timedelta(
+                seconds=RETRY_BACKOFF_CAP_SEC)).isoformat()
             log.warning("goal continue %s failed (%s); NO message fallback "
-                        "for goal threads, retrying in 10 min",
+                        "for goal threads, retrying in 3 min",
                         thread_id[:8], e)
             save_state(self.state)
             return True   # handled: caller must not fall back to exec/queue
@@ -1434,9 +1436,10 @@ class Daemon:
             if outcome.kind == "writer_conflict":
                 # contention with the desktop app, not a real failure:
                 # retry later without counting toward the park threshold
-                t.next_wake_iso = (_now() + timedelta(minutes=10)).isoformat()
+                t.next_wake_iso = (_now() + timedelta(
+                    seconds=RETRY_BACKOFF_CAP_SEC)).isoformat()
                 log.warning("resume %s -> writer conflict (app holds thread); "
-                            "recheck in 10 min", thread_id[:8])
+                            "recheck in 3 min", thread_id[:8])
                 self._notify(thread_id, "writer_conflict")
                 save_state(self.state)
                 return
@@ -1446,9 +1449,10 @@ class Daemon:
                 # model hit it so the next retry rotates the fallback chain.
                 t.last_kind = "server_overloaded"
                 t.overload_model = model or t.overload_model
-                t.next_wake_iso = (_now() + timedelta(seconds=float(
-                    self.cfg["general"]["server_overloaded_cooldown_sec"])
-                )).isoformat()
+                t.next_wake_iso = (_now() + timedelta(seconds=min(
+                    RETRY_BACKOFF_CAP_SEC,
+                    float(self.cfg["general"]["server_overloaded_cooldown_sec"])
+                ))).isoformat()
                 log.warning("resume %s -> model at capacity (model=%s); "
                             "retrying later", thread_id[:8], model or "?")
             else:

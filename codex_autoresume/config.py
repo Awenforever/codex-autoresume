@@ -52,8 +52,9 @@ DEFAULTS: dict[str, Any] = {
         # windows do not roll on the exact minute, give them room
         # random extra wait (0..N) to avoid thundering-herd on shared resets
         "jitter_sec": 45,
-        # per-thread minimum spacing between two resume attempts
-        "min_resume_interval_sec": 300,
+        # per-thread minimum spacing between two resume attempts (kept at
+        # the same 3-minute ceiling as the transient retry backoff)
+        "min_resume_interval_sec": 180,
         # global safety budget
         "max_resumes_per_day": 60,
         "max_resumes_per_thread_per_day": 12,

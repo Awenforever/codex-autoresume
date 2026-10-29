@@ -21,7 +21,7 @@ enabled = true
 
 poll_interval_sec = 30
 jitter_sec = 45                 # random extra delay (avoid burst resumes)
-min_resume_interval_sec = 300   # per-thread spacing between attempts
+min_resume_interval_sec = 180   # per-thread spacing between attempts
 max_resumes_per_day = 60        # global safety budget
 max_resumes_per_thread_per_day = 12
 

@@ -8,6 +8,7 @@ instead of incrementing fail_streak / error history forever.
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from unittest import mock
 
 import codex_autoresume.codexenv as ce
@@ -91,6 +92,53 @@ class GoalResumeBusyHandlingTest(unittest.TestCase):
         errors = [h for h in t.history
                   if isinstance(h, dict) and h.get("kind") == "goal_continue_error"]
         self.assertEqual(errors, [])
+
+
+class GoalRetryBackoffCapTest(unittest.TestCase):
+    """Writer contention / RPC failures retry within the 3-minute ceiling."""
+
+    def _daemon(self):
+        tmp = tempfile.mkdtemp(prefix="cxr-cap-")
+        d = object.__new__(dm.Daemon)
+        d.cfg = load_config(None)
+        d.codex_home = tmp
+        d.codex_bin = "codex.exe"
+        d.state = WatcherState(state_path=os.path.join(tmp, "state.json"))
+        t = d.state.thread("g1")
+        t.is_goal = True
+        t.tracked = True
+        return d, t
+
+    def _wait_secs(self, t):
+        return round((datetime.fromisoformat(t.next_wake_iso)
+                      - dm._now()).total_seconds())
+
+    def test_writer_busy_backoff_caps_at_three_minutes(self):
+        d, t = self._daemon()
+        decision = mock.Mock(model=None, reasoning_effort=None)
+        waits = []
+        with mock.patch.object(ce, "CodexState", _GoalsUsageLimited), \
+             mock.patch.object(rl, "goal_continue",
+                               side_effect=rl.GoalBusyError("busy")), \
+             mock.patch.object(dm.Daemon, "_uia_goal_continue",
+                               return_value=False):
+            for _ in range(5):
+                self.assertTrue(d._goal_resume("g1", t, decision))
+                waits.append(self._wait_secs(t))
+        self.assertAlmostEqual(waits[0], 60, delta=2)
+        self.assertAlmostEqual(waits[1], 120, delta=2)
+        for w in waits[2:]:
+            self.assertAlmostEqual(w, 180, delta=2)
+
+    def test_goal_continue_failure_retries_in_three_minutes(self):
+        d, t = self._daemon()
+        decision = mock.Mock(model=None, reasoning_effort=None)
+        with mock.patch.object(ce, "CodexState", _GoalsUsageLimited), \
+             mock.patch.object(rl, "goal_continue",
+                               side_effect=rl.RateLimitError("boom")):
+            self.assertTrue(d._goal_resume("g1", t, decision))
+        self.assertEqual(t.fail_streak, 1)
+        self.assertAlmostEqual(self._wait_secs(t), 180, delta=2)
 
 
 class GoalContinueSettingsTest(unittest.TestCase):

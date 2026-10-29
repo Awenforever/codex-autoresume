@@ -15,6 +15,9 @@ from .state import ThreadState
 from .timeparse import WEEKLY_THRESHOLD
 
 MAX_ATTEMPTS_BEFORE_PARK = 6
+# ceiling for any transient retry backoff: a guarded thread should come
+# back within 3 minutes even during a long outage
+RETRY_BACKOFF_CAP_SEC = 180
 
 
 @dataclass
@@ -163,13 +166,14 @@ def plan_for_thread(event: InterruptionEvent,
     # "Selected model is at capacity. Please try a different model." says
     # nothing about the task (it is not a question to the user, not a blocked
     # step); it only means this model's pool is full right now. Retrying is
-    # exactly the app's own Retry button. Each consecutive hit backs off
-    # (3m, 6m, 12m, 24m, then 48m) so a long outage keeps being guarded
-    # without hammering the API.
+    # exactly the app's own Retry button. Backoff grows with consecutive
+    # hits but is capped at RETRY_BACKOFF_CAP_SEC so a long outage never
+    # creates a long blind spot.
     due_reason = "reset window passed; resuming"
     if event.kind == "server_overloaded":
         cooldown = float(g["server_overloaded_cooldown_sec"])
         cooldown *= min(16, 2 ** min(max(0, int(tstate.overload_streak) - 1), 4))
+        cooldown = min(cooldown, RETRY_BACKOFF_CAP_SEC)
         if tstate.last_resume_iso:
             try:
                 since = (now - datetime.fromisoformat(
