@@ -164,6 +164,7 @@ font-variant-numeric:tabular-nums}
 .ringlbl{font-size:12px;color:var(--dim)}
 .ringreset{font-size:10.5px;color:var(--dim);text-align:center;line-height:1.35}
 .hinfo{min-width:0;display:flex;flex-direction:column;gap:7px}
+.hrows,#newsHost{min-width:0;display:flex;flex-direction:column;gap:7px}
 @media (max-width:460px){
 .hero{grid-template-columns:1fr;gap:20px}
 .ringcol{width:100%}}
@@ -420,7 +421,10 @@ button:hover,.tcard:hover{transform:none}}
   <div id="pausewrap"></div>
  </div>
  <div class="hinfo" id="hinfo">
-  <div style="color:var(--dim);font-size:13px" data-i18n="loading">Loading…</div>
+  <div class="hrows" id="hrows">
+   <div style="color:var(--dim);font-size:13px" data-i18n="loading">Loading…</div>
+  </div>
+  <div id="newsHost"></div>
  </div>
 </div>
 </div>
@@ -637,19 +641,58 @@ function stripTco(t){
 // older builds can still carry trailing links.
 return String(t||"").replace(/(?:\s*https?:\/\/t\.co\/\S+)+\s*$/i,"")
 .replace(/\s+/g," ").trim()}
-function newsBox(s){
+/* reading position: the 15s poll must not yank the news box back to the
+   newest item while someone is reading. #newsbox is a persistent node and
+   only its rows are replaced, so a reader's offset survives refreshes
+   untouched (assigning scrollTop after a rebuild was what visibly rolled
+   them back). newsHold decides whether new rows are followed down. Only
+   real input (wheel/touch/pointer) may arm it: scroll events are also
+   emitted by our own follow assignment and by post-layout reflow, and
+   those must never be mistaken for a reader. Scrolling again while still
+   off the bottom pushes the deadline out. */
+var newsHold=0,newsUserAt=0,newsSig="",NEWS_HOLD_MS=60000;
+function newsAtBottom(nb){
+return nb.scrollHeight-nb.scrollTop-nb.clientHeight<=2}
+function newsInput(){
+newsUserAt=Date.now()}
+function newsScroll(nb){
+if(newsAtBottom(nb)){newsHold=0;return}
+if(Date.now()-newsUserAt>500){return}
+newsHold=Date.now()+NEWS_HOLD_MS}
+function hinfoParts(){
+var h=document.getElementById("hinfo");
+var rows=document.getElementById("hrows");
+var host=document.getElementById("newsHost");
+if(!rows||!host){
+h.innerHTML='<div class="hrows" id="hrows"></div>'+
+'<div id="newsHost"></div>';
+rows=document.getElementById("hrows");
+host=document.getElementById("newsHost")}
+return {rows:rows,host:host}}
+function renderNews(s){
+ var host=hinfoParts().host;
  var ann=s.announcement||null;
  var es=(s.news_log&&s.news_log.length)?s.news_log:
  (ann&&ann.status?[{at:"",text:ann.status,kind:ann.status_kind}]:[]);
- if(!es.length){return ""}
+ if(!es.length){host.innerHTML="";newsSig="";newsHold=0;return}
+ if(!document.getElementById("newsbox")){
+ host.innerHTML='<div class="kv"><span id="newsKv"></span>'+
+ '<span id="newsWin" style="font-size:11px"></span></div>'+
+ '<div class="newsbox" id="newsbox" onscroll="newsScroll(this)"'+
+ ' onwheel="newsInput()" ontouchmove="newsInput()"'+
+ ' onpointerdown="newsInput()"></div>';
+ newsSig=""}
+ document.getElementById("newsKv").textContent=L("news");
+ document.getElementById("newsWin").textContent=L("newsWin");
  var rows="";
  for(var i=0;i<es.length;i++){
  var e=es[i];
  rows+='<div class="nl">'+(e.at?'<span class="d" title="'+L("postAt")+'">'+
  esc(fmtPostAt(e.at))+"</span>":"")+
  hlNews(esc(stripTco(e.text)))+"</div>"}
- return '<div class="kv"><span>'+L("news")+'</span><span style="font-size:11px">'+
- L("newsWin")+"</span></div>"+'<div class="newsbox" id="newsbox">'+rows+"</div>"}
+ var nb=document.getElementById("newsbox");
+ if(rows!==newsSig){newsSig=rows;nb.innerHTML=rows}
+ if(Date.now()>=newsHold&&!newsAtBottom(nb)){nb.scrollTop=nb.scrollHeight}}
 function fmtPostAt(iso){
  // the poster's own wall clock: tracker authors post in Pacific time, so
  // render the post instant in America/Los_Angeles (DST-aware via Intl)
@@ -803,12 +846,14 @@ var q=s.quota;
 var annRows=annRowsFor(s);
 var ringrow=document.getElementById("ringrow");
 var pausewrap=document.getElementById("pausewrap");
-var hinfo=document.getElementById("hinfo");
 if(!q){
 ringrow.innerHTML='<div style="flex:1;color:var(--dim);font-size:13px">'+
 L("quotaNA")+"</div>";
 pausewrap.innerHTML="";
-hinfo.innerHTML="";
+var none=hinfoParts();
+none.rows.innerHTML="";
+none.host.innerHTML="";
+newsHold=0;
 }else{
 ringrow.innerHTML=
 ring(q.primary_used,L("w5"),fmtHM(q.primary_reset))+
@@ -818,13 +863,14 @@ pausewrap.innerHTML='<button class="btn-pause" onclick="togglePause()">'+
 ?'<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4 1.8l6.2 4.2-6.2 4.2z" fill="currentColor"/></svg>'
 :'<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="3.2" y="2.4" width="1.9" height="7.2" rx=".6" fill="currentColor"/><rect x="6.9" y="2.4" width="1.9" height="7.2" rx=".6" fill="currentColor"/></svg>')+
 '<span>'+(s.paused?L("resumeAll"):L("pauseAll"))+"</span></button>";
-hinfo.innerHTML=
+hinfoParts().rows.innerHTML=
 kvRow(L("status"),'<b class="'+(q.allowed===false?"bad":"ok")+'">'+
 (q.allowed===false?L("limited"):q.allowed===true?L("avail"):L("unknown"))+"</b>")+
 etaRow(L("eta5"),q,"eta_primary","rate_primary")+
 etaRow(L("etaw"),q,"eta_secondary","rate_secondary","secondary_exhausted_at","eta_secondary_capped")+
 kvRow(L("credits"),'<b>'+fmt((q.credits_count!==undefined)?q.credits_count:q.credits)+"</b>")+
-annRows+newsBox(s);
+annRows;
+renderNews(s);
 }
 document.getElementById("chips").innerHTML=
 s.dry_run?'<span class="chip dry">DRY-RUN</span>':"";
@@ -917,15 +963,13 @@ cardSwitch+prioCtl+"</div>"+
 if(!threadsInteractive()){
 document.getElementById("threads").innerHTML=rows||
 '<div class="card empty">'+L("noThread")+"</div>"}
-var nb=document.getElementById("newsbox");
-if(nb){nb.scrollTop=nb.scrollHeight}
 }).catch(function(e){
 if(window.__updating){
- document.getElementById("hinfo").innerHTML=
+ hinfoParts().rows.innerHTML=
  '<div style="color:var(--dim);font-size:13px">'+L("updRestarting")+"</div>";
  return}
 var why=(e&&e.message==="timeout")?L("errTimeout"):L("errFail");
-document.getElementById("hinfo").innerHTML=
+hinfoParts().rows.innerHTML=
 '<div style="color:var(--danger);font-size:13px">'+L("errConn")+why+L("errHint")+
 "schtasks /Run /TN codex-autoresume</div>"})}
 function setT(id,o){api("/api/threads/"+id,o).then(function(r){

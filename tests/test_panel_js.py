@@ -283,7 +283,6 @@ function getComputedStyle(){return{getPropertyValue:function(n){
 var I18N={en:{forecast:"Forecast",landed:"Landed",card:"Credits",wk:"Weekly"}};
 function L(k){return I18N.en[k]||k}
 function kvRow(k,v){return k+"="+v+"\n"}
-function newsBox(s){return ""}
 function esc(s){return String(s)}
 function fmtISO(iso){return "I("+iso+")"}
 function fmtMDHM(e){return "T"+Math.round(e)}
@@ -426,7 +425,7 @@ class PanelEscapingTest(unittest.TestCase):
             self.skipTest("node not installed")
         from codex_autoresume.control import PANEL_HTML
         js = re.search(r"<script>(.*)</script>", PANEL_HTML, re.S).group(1)
-        m = re.search(r"(function esc\(s\)\{.*?)(?=function newsBox)", js,
+        m = re.search(r"(function esc\(s\)\{.*?)(?=/\* reading position)", js,
                       re.S)
         self.assertTrue(m, "esc/hlNews not found in panel script")
         harness = m.group(1) + r"""
@@ -624,6 +623,137 @@ console.log(JSON.stringify({payload:payload,label:btn.textContent,
         self.assertFalse(got["open"])
         self.assertFalse(got["sel0"])
         self.assertTrue(got["sel2"])
+
+
+class PanelNewsScrollHoldTest(unittest.TestCase):
+    """Reading older news must survive the 15s poll with no rollback at all."""
+
+    def test_news_box_is_persistent_across_refreshes(self):
+        from codex_autoresume.control import PANEL_HTML
+        self.assertIn('onscroll="newsScroll(this)"', PANEL_HTML)
+        self.assertIn('onwheel="newsInput()"', PANEL_HTML)
+        self.assertIn("newsHold=Date.now()+NEWS_HOLD_MS", PANEL_HTML)
+        self.assertIn("if(Date.now()-newsUserAt>500){return}", PANEL_HTML)
+        self.assertIn("NEWS_HOLD_MS=60000", PANEL_HTML)
+        # polling replaces rows in place and only re-follows after the hold
+        self.assertIn("if(rows!==newsSig){newsSig=rows;nb.innerHTML=rows}",
+                      PANEL_HTML)
+        self.assertIn("if(Date.now()>=newsHold&&!newsAtBottom(nb)){",
+                      PANEL_HTML)
+        self.assertEqual(PANEL_HTML.count("nb.scrollTop="), 1)
+        self.assertNotIn("newsRestore", PANEL_HTML)
+        # the whole hinfo must never be rebuilt: that destroyed #newsbox
+        self.assertNotIn("hinfo.innerHTML", PANEL_HTML)
+        self.assertIn('id="hrows"', PANEL_HTML)
+        self.assertIn('id="newsHost"', PANEL_HTML)
+
+    def test_reading_position_is_never_rewritten(self):
+        if not shutil.which("node"):
+            self.skipTest("node not installed")
+        js = _panel_js()
+        harness = ("var newsHold=0,newsUserAt=0,newsSig=\"\",NEWS_HOLD_MS=60000;\n"
+                   + _fn(js, "newsAtBottom") + "\n"
+                   + _fn(js, "newsInput") + "\n"
+                   + _fn(js, "newsScroll") + "\n"
+                   + _fn(js, "hinfoParts") + "\n"
+                   + _fn(js, "renderNews") + r"""
+var now=1000000;Date.now=function(){return now};
+var nodes={};
+function El(id){
+ var self=this;self.id=id;self.clientHeight=100;self._sh=100;self._st=0;
+ self._html="";self.textContent="";self.__sets=0;
+ Object.defineProperty(self,"scrollHeight",{get:function(){return self._sh}});
+ Object.defineProperty(self,"scrollTop",{
+  get:function(){return self._st},
+  set:function(v){self._st=Math.max(0,Math.min(v,self._sh-self.clientHeight))}});
+ Object.defineProperty(self,"innerHTML",{
+  get:function(){return self._html},
+  set:function(v){
+   self._html=v;self.__sets++;
+   if(id==="hinfo"){
+    nodes.hrows=new El("hrows");nodes.newsHost=new El("newsHost")}
+   else if(id==="newsHost"){
+    if(v.indexOf('id="newsbox"')>=0){
+     nodes.newsbox=new El("newsbox");
+     nodes.newsKv=new El("newsKv");
+     nodes.newsWin=new El("newsWin")}
+    else{nodes.newsbox=null}}
+   else if(id==="newsbox"){
+    var n=(v.match(/class="nl"/g)||[]).length;
+    self._sh=n>0?50*n:100;
+    if(self._st>self._sh-self.clientHeight){
+     self._st=self._sh-self.clientHeight}}}
+ });
+}
+nodes.hinfo=new El("hinfo");
+var document={getElementById:function(id){return nodes[id]||null}};
+function L(k){return k}
+function esc(s){return String(s)}
+function hlNews(s){return s}
+function stripTco(s){return s}
+function fmtPostAt(){return "T"}
+function news(n){
+ var a=[];for(var i=0;i<n;i++){a.push({at:"2026-10-29T0"+i+":00:00Z",text:"item "+i})}
+ return {announcement:null,news_log:a}}
+renderNews(news(5));
+var first=nodes.newsbox,st0=first.scrollTop;
+first.scrollTop=153;newsScroll(first);
+var holdEcho=newsHold;
+newsInput();first.scrollTop=50;newsScroll(first);var hold1=newsHold;
+now=1015000;renderNews(news(10));
+var sameNode=nodes.newsbox===first;
+var holdAfterRender=newsHold;
+var stReading=first.scrollTop,sh10=first.scrollHeight;
+var setsReading=first.__sets;
+now=1016000;renderNews(news(10));
+var stNoOp=first.scrollTop,setsNoOp=first.__sets;
+newsInput();first.scrollTop=90;newsScroll(first);var holdExtended=newsHold;
+now=1130000;renderNews(news(10));
+var stFollowed=first.scrollTop,setsFollowed=first.__sets;
+newsInput();first.scrollTop=150;newsScroll(first);var hold2=newsHold;
+now=1145000;renderNews(news(12));
+var stHeldNow=first.scrollTop,sets12=first.__sets;
+newsInput();first.scrollTop=first.scrollHeight;newsScroll(first);
+var hold3=newsHold;
+renderNews(news(12));
+var stBottom=first.scrollTop,setsBottom=first.__sets;
+renderNews({announcement:null,news_log:[]});
+var hostCleared=nodes.newsHost.innerHTML===""&&!nodes.newsbox;
+var holdCleared=newsHold===0;
+nodes.hinfo.innerHTML="<div>err</div>";
+renderNews(news(3));
+var recovered=!!nodes.newsbox&&nodes.newsbox.scrollTop===50;
+console.log(JSON.stringify({st0:st0,holdEcho:holdEcho,hold1:hold1,
+ sameNode:sameNode,holdAfterRender:holdAfterRender,stReading:stReading,
+ sh10:sh10,setsReading:setsReading,stNoOp:stNoOp,setsNoOp:setsNoOp,
+ holdExtended:holdExtended,stFollowed:stFollowed,
+ setsFollowed:setsFollowed,hold2:hold2,stHeldNow:stHeldNow,
+ sets12:sets12,hold3:hold3,stBottom:stBottom,setsBottom:setsBottom,
+ hostCleared:hostCleared,holdCleared:holdCleared,recovered:recovered}));
+""")
+        got = _run_node(harness)
+        self.assertEqual(got["st0"], 150)
+        self.assertEqual(got["holdEcho"], 0)
+        self.assertEqual(got["hold1"], 1060000)
+        self.assertTrue(got["sameNode"])
+        self.assertEqual(got["holdAfterRender"], 1060000)
+        self.assertEqual(got["stReading"], 50)
+        self.assertEqual(got["sh10"], 500)
+        self.assertEqual(got["setsReading"], 2)
+        self.assertEqual(got["stNoOp"], 50)
+        self.assertEqual(got["setsNoOp"], 2)
+        self.assertEqual(got["holdExtended"], 1076000)
+        self.assertEqual(got["stFollowed"], 400)
+        self.assertEqual(got["setsFollowed"], 2)
+        self.assertEqual(got["hold2"], 1190000)
+        self.assertEqual(got["stHeldNow"], 150)
+        self.assertEqual(got["sets12"], 3)
+        self.assertEqual(got["hold3"], 0)
+        self.assertEqual(got["stBottom"], 500)
+        self.assertEqual(got["setsBottom"], 3)
+        self.assertTrue(got["hostCleared"])
+        self.assertTrue(got["holdCleared"])
+        self.assertTrue(got["recovered"])
 
 
 class PanelUpdateCheckTest(unittest.TestCase):
