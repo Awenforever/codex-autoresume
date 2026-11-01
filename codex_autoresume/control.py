@@ -215,6 +215,8 @@ padding:0 6px;margin-right:10px;font-variant-numeric:tabular-nums}
 .hl-reset .rl:nth-child(5n){color:var(--reset)}
 .chip{white-space:nowrap}
 .kv .ok{color:var(--accent)} .kv .bad{color:var(--danger)} .kv .eta{color:var(--warn)}
+.kv .cexp{color:var(--dim);font-weight:400;font-size:12px;margin-left:8px;
+white-space:nowrap;cursor:help}
 .kv .ok,.kv .eta{transition:color .4s ease}
 button{background:var(--glass-btn);border:1px solid var(--glass-brd-soft);color:var(--fg);
 border-radius:10px;padding:7px 16px;font-size:13px;cursor:pointer;
@@ -451,7 +453,7 @@ credits:"重置赠送",forecast:"预告",landed:"到账",
 news:"动态",pauseAll:"全部暂停",resumeAll:"全部继续",
 recent:"近期会话",
 noThread:"暂无近期会话——在 Codex 里打开一个对话，面板会自动刷新",
-guard:"守护",weekly:"跨周",card:"重置卡",noneC:"（无）",expirePfx:"（到期 ",
+guard:"守护",weekly:"跨周",card:"重置卡",noneC:"（无）",creditsExpTip:"所有重置赠送中最早到期的一张（到期即作废）",
 model:"模型",inherit:"继承",rsn:"推理",prompt:"继续指令",resetD:"恢复默认",
 lastUpd:"最近",resumed:"成功恢复",times:" 次",tryPfx:"（尝试 ",trySfx:"）",
 
@@ -480,7 +482,7 @@ news:"News",pauseAll:"Pause all",resumeAll:"Resume all",
 recent:"Recent conversations",
 noThread:"No recent conversations — open one in Codex; the panel refreshes automatically",
 guard:"Auto-resume",weekly:"Weekly",card:"Credits",noneC:"(none)",
-expirePfx:" (expires ",model:"Model",inherit:"Inherit",rsn:"Reasoning",prompt:"Resume prompt",
+creditsExpTip:"Expiry of the reset credit that expires first",model:"Model",inherit:"Inherit",rsn:"Reasoning",prompt:"Resume prompt",
 resetD:"Reset",lastUpd:"Last",resumed:"resumed",times:"×",tryPfx:" (",
 trySfx:" tries)",
 tipGuard:"On: automatically continue this thread when the 5h quota resets",
@@ -863,12 +865,15 @@ pausewrap.innerHTML='<button class="btn-pause" onclick="togglePause()">'+
 ?'<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4 1.8l6.2 4.2-6.2 4.2z" fill="currentColor"/></svg>'
 :'<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="3.2" y="2.4" width="1.9" height="7.2" rx=".6" fill="currentColor"/><rect x="6.9" y="2.4" width="1.9" height="7.2" rx=".6" fill="currentColor"/></svg>')+
 '<span>'+(s.paused?L("resumeAll"):L("pauseAll"))+"</span></button>";
+var cNum=(q.credits_count!==undefined)?q.credits_count:q.credits;
+var cExp=(cNum&&q.credits_nearest_expiry)
+?'<span class="cexp tip end" data-tip="'+esc(L("creditsExpTip"))+'">⏳ '+fmtMDHM(q.credits_nearest_expiry)+"</span>":"";
 hinfoParts().rows.innerHTML=
 kvRow(L("status"),'<b class="'+(q.allowed===false?"bad":"ok")+'">'+
 (q.allowed===false?L("limited"):q.allowed===true?L("avail"):L("unknown"))+"</b>")+
 etaRow(L("eta5"),q,"eta_primary","rate_primary")+
 etaRow(L("etaw"),q,"eta_secondary","rate_secondary","secondary_exhausted_at","eta_secondary_capped")+
-kvRow(L("credits"),'<b>'+fmt((q.credits_count!==undefined)?q.credits_count:q.credits)+"</b>")+
+kvRow(L("credits"),'<b>'+fmt(cNum)+"</b>"+cExp)+
 annRows;
 renderNews(s);
 }
@@ -890,7 +895,6 @@ var ocTxt=oc?(L(ocMap[oc]||"")!==ocMap[oc]?L(ocMap[oc]):esc(oc)):"";
 var cq0=s.quota||{};
 var cc0=(cq0.credits_count!==undefined)?cq0.credits_count:cq0.credits;
 var cInfo=(cc0?("×"+cc0):L("noneC"));
-if(cc0&&cq0.credits_nearest_expiry){cInfo+=L("expirePfx")+fmtMDHM(cq0.credits_nearest_expiry)+")"}
 var cardSwitch='<div class="ctl tipn end" data-tip="'+esc(L("tipCard"))+'">'+
 '<label class="sw"><input type="checkbox"'+(t.reset_card?" checked":"")+
 ' onchange="setT(\''+jsq(t.id)+'\',{reset_card:this.checked})"><i></i></label>'+
@@ -955,8 +959,8 @@ esc((t.title||"")||String(t.id||"").slice(0,13))+"</span>"+badges+"</div>"+
 '<label class="sw"><input type="checkbox"'+(t.weekly?" checked":"")+
 ' onchange="setT(\''+jsq(t.id)+'\',{weekly:this.checked})"><i></i></label>'+
 '<label>'+L("weekly")+"</label></div>"+
-cardSwitch+prioCtl+"</div>"+
-'<div class="controls2">'+modelCtl+rsel+"</div>"+promptRow+"</div>";
+cardSwitch+"</div>"+
+'<div class="controls2">'+modelCtl+rsel+prioCtl+"</div>"+promptRow+"</div>";
 }
 /* never rebuild the list under an open dropdown or mid-typing: the
    rebuild is what used to swallow the dropdown the instant it opened */
