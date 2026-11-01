@@ -32,6 +32,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
@@ -59,6 +60,52 @@ class ResetCredit:
     status: str
     title: str | None = None
 
+    @property
+    def available(self) -> bool:
+        # app-server omits status on some builds; a credit listed in the
+        # summary without a terminal status is still redeemable.
+        return (self.status or "").strip().lower() in (
+            "", "available", "unknown", "granted", "active")
+
+
+def _epoch(value) -> int | None:
+    """Epoch seconds from epoch ints/millis or ISO-8601 strings.
+
+    ``wham/usage`` renders credit timestamps as ISO strings while the
+    app-server protocol uses integer seconds; a strict ``int()`` on the
+    former raised and (because the whole credit block was one try) wiped
+    every credit, so the panel showed 0 / "(none)" despite available cards.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        n = float(value)
+        return int(n / 1000) if n > 1e11 else int(n)
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        n = float(s)
+    except ValueError:
+        pass
+    else:
+        return int(n / 1000) if n > 1e11 else int(n)
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp())
+
+
+def _count(value) -> int | None:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 0 else None
+
 
 @dataclass
 class QuotaSnapshot:
@@ -68,10 +115,23 @@ class QuotaSnapshot:
     plan_type: str | None = None
     rate_limit_reached_type: str | None = None
     reset_credits: list[ResetCredit] = field(default_factory=list)
+    # authoritative count from availableCount / available_count; the
+    # credits list can be partial, so len() is only a fallback
+    reset_credits_available: int | None = None
     fetched_at: float = field(default_factory=time.time)
     raw: dict | None = None
 
     # ------------------------------------------------------------- helpers
+
+    @property
+    def available_reset_credits(self) -> list[ResetCredit]:
+        return [c for c in self.reset_credits if c.available]
+
+    @property
+    def reset_credits_count(self) -> int:
+        if self.reset_credits_available is not None:
+            return self.reset_credits_available
+        return len(self.available_reset_credits)
 
     @classmethod
     def from_response(cls, resp: dict) -> "QuotaSnapshot":
@@ -82,14 +142,16 @@ class QuotaSnapshot:
         snap.secondary = _window(limits.get("secondary"))
         snap.plan_type = limits.get("planType")
         snap.rate_limit_reached_type = limits.get("rateLimitReachedType")
-        credits = (resp.get("rateLimitResetCredits") or {}).get("credits") or []
-        for c in credits:
+        summary = resp.get("rateLimitResetCredits") or {}
+        snap.reset_credits_available = _count(summary.get("availableCount"))
+        for c in (summary.get("credits") or []):
+            if not isinstance(c, dict):
+                continue
             try:
                 snap.reset_credits.append(ResetCredit(
                     id=str(c.get("id")),
-                    granted_at=int(c.get("grantedAt") or 0),
-                    expires_at=(int(c["expiresAt"])
-                                if c.get("expiresAt") is not None else None),
+                    granted_at=_epoch(c.get("grantedAt")) or 0,
+                    expires_at=_epoch(c.get("expiresAt")),
                     reset_type=str(c.get("resetType") or "unknown"),
                     status=str(c.get("status") or "unknown"),
                     title=c.get("title"),
@@ -355,30 +417,48 @@ def fetch_quota_http(codex_home: str, timeout: float = 20) -> QuotaSnapshot:
         secondary=_win(rl.get("secondary_window")),
         plan_type=body.get("plan_type"),
     )
+    # the usage payload already carries the authoritative count; seed it
+    # so a failure of the detail endpoint below cannot hide the cards
+    usage_credits = body.get("rate_limit_reset_credits") or {}
+    if isinstance(usage_credits, dict):
+        snap.reset_credits_available = _count(
+            usage_credits.get("available_count")
+            if usage_credits.get("available_count") is not None
+            else usage_credits.get("applicable_available_count"))
     # reset credits (best-effort separate endpoint)
     try:
         credits = _get(WHAM_CREDITS_URL)
         items = None
+        total = None
         if isinstance(credits, dict):
             items = (credits.get("credits") or credits.get("data")
                      or credits.get("items"))
-            if items is None and credits.get("available_count") == 0:
+            total = _count(credits.get("available_count"))
+            if total is not None:
+                snap.reset_credits_available = total
+            if items is None and total == 0:
                 items = []
         elif isinstance(credits, list):
             items = credits
         for c in (items or []):
             if not isinstance(c, dict):
                 continue
-            snap.reset_credits.append(ResetCredit(
-                id=str(c.get("id") or c.get("credit_id") or ""),
-                granted_at=int(c.get("granted_at") or c.get("grantedAt") or 0),
-                expires_at=(int(c["expires_at"] if c.get("expires_at") is not
-                                None else c.get("expiresAt", 0)) or None),
-                reset_type=str(c.get("reset_type") or c.get("resetType")
-                               or "unknown"),
-                status=str(c.get("status") or "available"),
-                title=c.get("title"),
-            ))
+            try:
+                snap.reset_credits.append(ResetCredit(
+                    id=str(c.get("id") or c.get("credit_id") or ""),
+                    granted_at=_epoch(c.get("granted_at")
+                                      if c.get("granted_at") is not None
+                                      else c.get("grantedAt")) or 0,
+                    expires_at=_epoch(c.get("expires_at")
+                                      if c.get("expires_at") is not None
+                                      else c.get("expiresAt")),
+                    reset_type=str(c.get("reset_type") or c.get("resetType")
+                                   or "unknown"),
+                    status=str(c.get("status") or "available"),
+                    title=c.get("title"),
+                ))
+            except (TypeError, ValueError):
+                continue
     except Exception:
         pass                       # credits stay empty on any failure
     return snap

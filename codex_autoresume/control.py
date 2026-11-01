@@ -1293,7 +1293,7 @@ class ControlApi:
                 "secondary_reset": snap.secondary.resets_at,
                 "secondary_exhausted_at": (
                     st.secondary_exhausted_at if st else None),
-                "credits": len(snap.reset_credits),
+                "credits": snap.reset_credits_count,
                 "allowed": snap.ordinary_usage_allowed,
                 "fetched_at": getattr(d, "_snapshot_wall", None),
                 "eta_primary": eta_p,
@@ -1304,9 +1304,9 @@ class ControlApi:
                 "weekly_ratio": round(t, 4) if t else None,
                 "weekly_ratio_windows": (len(st.weekly_ratio_windows)
                                          if st else 0),
-                "credits_count": len(snap.reset_credits),
+                "credits_count": snap.reset_credits_count,
                 "credits_nearest_expiry": (
-                    min((c.expires_at for c in snap.reset_credits
+                    min((c.expires_at for c in snap.available_reset_credits
                          if c.expires_at), default=None) or None),
             }
         ann = d.cached_announcement()

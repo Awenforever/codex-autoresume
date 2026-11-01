@@ -460,10 +460,11 @@ class Daemon:
         snap = self._snapshot
         if snap is None:
             return
-        ids = {c.id for c in snap.reset_credits}
+        credits = snap.available_reset_credits
+        ids = {c.id for c in credits}
         if self._seen_credit_ids:
             fresh = ids - self._seen_credit_ids
-            for c in snap.reset_credits:
+            for c in credits:
                 if c.id in fresh:
                     landed = _now().isoformat(timespec="seconds")
                     log.info("reset credit granted: %s (%s, expires %s) "
@@ -620,7 +621,7 @@ class Daemon:
         available. One redemption frees the whole account; a 30-minute
         cooldown prevents runaway loops.
         """
-        if snapshot is None or not snapshot.reset_credits:
+        if snapshot is None or snapshot.reset_credits_count <= 0:
             return
         if snapshot.secondary.used_percent is None \
                 or snapshot.secondary.used_percent < 100:
@@ -725,7 +726,7 @@ class Daemon:
                      "secondary=%s%% credits=%d",
                      self._snapshot.ordinary_usage_allowed,
                      p.used_percent, s.used_percent,
-                     len(self._snapshot.reset_credits))
+                     self._snapshot.reset_credits_count)
         return self._snapshot
 
     # ------------------------------------------------ quota-limit evidence

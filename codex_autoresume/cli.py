@@ -61,7 +61,7 @@ def cmd_status(args) -> int:
               "resetCredits=%d" % (snap.ordinary_usage_allowed,
                                    snap.primary.used_percent,
                                    snap.secondary.used_percent,
-                                   len(snap.reset_credits)))
+                                   snap.reset_credits_count))
     except Exception as e:
         print("quota     : unavailable (%s)" % e)
     return 0
@@ -236,6 +236,7 @@ def cmd_limits(args) -> int:
                       "windowDurationMins": snap.secondary.window_duration_mins},
         "planType": snap.plan_type,
         "rateLimitReachedType": snap.rate_limit_reached_type,
+        "resetCreditsAvailable": snap.reset_credits_count,
         "resetCredits": [{"id": c.id, "grantedAt": c.granted_at,
                           "expiresAt": c.expires_at, "status": c.status,
                           "title": c.title} for c in snap.reset_credits],
