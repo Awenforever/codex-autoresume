@@ -41,6 +41,10 @@ class ThreadState:
     continued_turn_id: str | None = None
     continue_fails: int = 0
     last_kind: str = ""                 # last interruption kind
+    # newest turn whose interruption the guard has already taken as the
+    # cause; a different (newer) turn is a new interruption, and a newest
+    # turn that is no longer failed means the evidence is obsolete
+    last_turn_id: str | None = None
     last_reset_at: str | None = None    # ISO
     next_wake_iso: str | None = None
     last_resume_iso: str | None = None
@@ -56,6 +60,28 @@ class ThreadState:
     fail_streak: int = 0
     last_outcome: str = ""
     last_error: str = ""
+    # guard lifecycle shown as one pill in the panel:
+    #   watching | waiting | running | delivered | stage | completed |
+    #   paused | stopped ("" / not tracked = guard off)
+    # Derived from authoritative DB state every tick; persisted so a
+    # transition (goal complete -> delivered -> new turn) is not lost
+    # between polls.
+    phase: str = ""
+    phase_reason: str = ""
+    phase_at: str | None = None
+    phase_turn_id: str | None = None
+    # newest turn when the guard last launched/clicked a resume; the first
+    # completed turn after it proves the delivery. A floor turn that was
+    # still unfinished at capture (failed/interrupted/inProgress) counts
+    # when it completes itself -- Continue may finish the same turn in
+    # place instead of appending a new one. Goal status remains the ONLY
+    # authoritative completion signal.
+    resume_floor_turn_id: str | None = None
+    resume_floor_open: bool = False
+    delivered_turn_id: str | None = None
+    # panel ordering: pinned cards first, then manual rank (None = recency)
+    ui_pin: bool = False
+    ui_order: int | None = None
     history: list[dict[str, Any]] = field(default_factory=list)
 
     def append_history(self, entry: dict[str, Any], keep: int = 50) -> None:
@@ -72,6 +98,28 @@ class ThreadState:
         self.resume_count_today += 1
         self.total_resumes += 1
         return True
+
+
+def arm_thread(t: ThreadState) -> None:
+    """Explicit guard enable: retry from a clean slate.
+
+    The interruption itself is adopted from the Codex turn history by the
+    daemon; guessing a kind here used to arm threads with evidence they
+    did not have. A thread parked after repeated failures becomes eligible
+    again the moment the user asks for it.
+    """
+    t.manual = True
+    t.tracked = True
+    t.fail_streak = 0
+    t.overload_streak = 0
+    t.next_wake_iso = None
+    t.phase = "watching"
+    t.phase_reason = ""
+    t.phase_at = None
+    t.phase_turn_id = None
+    t.resume_floor_turn_id = None
+    t.resume_floor_open = False
+    t.delivered_turn_id = None
 
 
 @dataclass

@@ -1,6 +1,7 @@
 # Design notes & prior-art survey
 
-Date: 2026-10-24. Target: OpenAI Codex with the sqlite state layout
+Date: 2026-10-24. Updated 2026-11-02 for 0.4.0 (guard lifecycle, resume
+prompt, panel order). Target: OpenAI Codex with the sqlite state layout
 (codex-cli 0.15x+ / desktop app 26.x). This document records why the tool
 exists, what was reused, and the ground-truth observations it is built on.
 
@@ -129,9 +130,28 @@ detect (read-only sqlite)  ──▶  planner (pure logic)  ──▶  daemon lo
 - **Quota-limit interruptions are first-hand evidence**: a turn that failed
   with `usageLimitExceeded` proves the window was empty at that moment, so
   its reset time overrides a trailing snapshot (which may still read 99%)
-  until a clearly newer window is observed.
+  until a clearly newer window is observed. The opposite also holds: the
+  interruption only owns the thread while it is still the **newest** turn,
+  and only for the lifetime of the window it happened in (6h primary / 7d
+  weekly). A later completed or interrupted turn means the user moved on,
+  and a stop from days ago is finished work — neither may receive an
+  injected prompt. State records `last_turn_id` so this can be rechecked at
+  send time, not just at scheduling time.
+- **Arming after the fact adopts real evidence**: enabling the guard for a
+  conversation that was interrupted *before* the guard existed cannot rely
+  on a detection event (cold start seeds that history as seen). Instead the
+  armed thread adopts its newest failed turn — kind, reset time and original
+  message — on the next heartbeat. Arming also clears `fail_streak` /
+  `overload_streak` and any wake time, so a previously parked thread is
+  eligible again; no interruption kind is ever fabricated.
+- **Cold-start seeding is bounded by the persisted watermark**: failures at
+  or below the watermark are history (already ingested by an earlier run),
+  while anything newer — recorded while the daemon was down — still flows
+  through normal detection.
 - **Weekly policy is opt-in** because a multi-day parked watcher silently
   burning a fresh weekly window is a bigger decision than a 5-hour one;
+  with `weekly_resume = "off"` a weekly-limit interruption disarms the
+  thread instead of waiting days for a resume that will not happen, and
   `weekly_resume = "per-thread"` + `threads.<id>.weekly_resume = true`
   matches "根据用户需要在周额度用光并且重置到账时自动继续".
 
@@ -142,3 +162,70 @@ detect (read-only sqlite)  ──▶  planner (pure logic)  ──▶  daemon lo
 - **No writes to Codex databases** — the app owns that state; a corrupted
   thread_history is catastrophic vs. a missed resume.
 - **No auto `codex login`** — auth refresh stays with Codex itself.
+
+## 6. Guard lifecycle (0.4.0)
+
+The panel must answer "is this conversation finished, interrupted, or only
+between stages?" without reading the model's prose. The phase is a
+deterministic fold over machine facts, evaluated every heartbeat:
+
+| Source | Signal | Phase |
+|---|---|---|
+| thread_goals | `status = complete` | ✓ Completed |
+| thread_goals | `usage_limited` / `budget_limited` / `blocked` | Waiting (quota / budget / blocked) |
+| thread_turns + state | newest `failed`/`interrupted` with persisted limit evidence | Waiting (quota / capacity) |
+| thread_turns + goal | newest turn `completed` while the goal is still active | Stage done |
+| resume floor | first completed final-answer turn after a guard resume on an ordinary thread | Resumed |
+| none of the above | — | Watching |
+
+Lifecycle overrides sit above the fold: guard off → Off (a persisted
+`stopped` phase survives guard-off so the guard's own weekly decision stays
+visible), paused → Paused, in-flight → Running.
+
+Design rules:
+
+- **Ordinary conversations are never marked complete.** A turn boundary only
+  returns control to the user; declaring "done" would require guessing from
+  prose, which is exactly the failure mode being removed. Only the goal
+  database's own status is authoritative.
+- **Completion is sticky** until a newer turn or re-arm. The app may clear
+  the goal row after completion; without stickiness a stale "stage" would
+  silently undo the flip the user just saw.
+- **Delivery uses a captured floor turn.** Before every resume the daemon
+  records the newest turn; the first completed turn with a final answer above
+  it is the guard's delivery. `resume_floor_open` covers the Continue path,
+  where the floor turn itself completes in place and still counts.
+- **The flip is durable and observable.** `phase`, `phase_at`, and
+  `phase_turn_id` persist in `state.json`; `goal_complete` / `delivered`
+  history entries are appended; `goal_complete` fires `notify_command`.
+- **Completion does not switch the guard off.** The user owns that decision;
+  the pill's tooltip says the guard is still on and how to stop it.
+
+## 7. Resume prompt (0.4.0)
+
+Community-tested resume instructions converge on the same points: do not say
+"continue" into a stale transcript — first read the current files, git state,
+and last output; do not recap or redo finished work; keep working until
+blocked; stop for destructive/external actions or a real human decision; and
+do not trust a self-reported "done". The built-in prompt compresses this to
+~90 words with three explicit exits (continue / already done / report the
+failing check).
+
+The prompt is not the verification mechanism. Goal completion comes from the
+goal database, and ordinary threads can only ever report "delivered"; an
+asynchronous harness must check artifacts, not rely on the model's claim.
+Per-thread prompt overrides remain for users with special tasks.
+
+## 8. Panel order (0.4.0)
+
+- `ui_pin` and `ui_order` live in `state.json` (they are UI state, not
+  config); both survive daemon restarts.
+- Sort: pinned first; inside a group, threads never placed by the user float
+  above manual ranks by recency; placed threads follow `ui_order`.
+- The client sends the complete visible order plus the pinned set to
+  `/api/threads/reorder`; the server writes rank and group in one atomic
+  state save, so a drop across the divider can pin/unpin and reorder together.
+- Affordances are hover-only: a grip and a pin in the card header, a single
+  hairline between groups, and an accent insertion bar while dragging.
+  Dropping exactly on the boundary keeps the previous pin state, so a near
+  miss cannot flip a card between groups.

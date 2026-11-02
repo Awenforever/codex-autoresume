@@ -28,6 +28,10 @@ Users can say these things in any Codex conversation; call the matching tool.
   tell the user to open the link — Codex opens links in the in-app browser by
   default) / 在应用内浏览器打开 **http://127.0.0.1:8765**（若可用浏览器/导航工具则
   直接打开，否则告诉用户点开该链接，Codex 默认在应用内打开）
+  - If the browser shows `ERR_CONNECTION_REFUSED`, the local daemon is not
+    running — do not debug the network; follow Process management below. /
+    若浏览器显示 `ERR_CONNECTION_REFUSED`，说明本机守护进程没在运行——不要排查
+    网络，按下面的「进程管理」处理。
 
 If the current conversation cannot be found, show the conversation list
 (titles + times) returned by `autoresume_status()` and ask the user to pick one.
@@ -60,9 +64,16 @@ If the current conversation cannot be found, show the conversation list
 ## Behavior contract (what the user expects) / 行为契约（用户预期）
 
 - Resuming fires ONLY when: the conversation has no running turn AND the goal
-  (if any) is not paused by the user AND the 5-hour window has quota. /
-  仅当：会话没有正在运行的回合、goal（如有）未被用户暂停、且 5 小时窗口有余量时，
-  才会触发继续。
+  (if any) is not paused by the user AND the 5-hour window has quota AND the
+  usage-limit interruption is still the conversation's newest turn. Enabling
+  guarding after the interruption already happened also works: the guard
+  adopts the newest failed turn (kind, reset time, original message) instead
+  of guessing a window; once the user has continued or finished the
+  conversation, the stale evidence is dropped and nothing is injected. /
+  仅当：会话没有正在运行的回合、goal（如有）未被用户暂停、5 小时窗口有余量、
+  且额度中断仍是该会话的最新回合时，才会触发继续。中断发生后才开启守护也
+  有效：守护读取最新的失败回合（类型、重置时间、原始消息），不靠猜窗口；
+  一旦用户已自行继续或结束对话，旧证据会被丢弃，不会注入任何内容。
 - Goal conversations are continued via the app's official goal-continue action
   (`thread/goal/set`), never by injecting messages. / goal 对话通过应用的官方
   goal 继续动作（`thread/goal/set`）恢复，绝不注入消息。
@@ -70,6 +81,30 @@ If the current conversation cannot be found, show the conversation list
   configured model/effort; if the desktop app holds the thread, delivery falls
   back to `codex queue`. / 普通会话通过无头 `codex exec resume` 以配置的
   模型/强度恢复；若桌面应用占用该线程，则回退为 `codex queue` 投递。
+- A stopped turn (newest status `interrupted`, Send shown as Continue) is
+  continued through the same RPC the app button uses — never by injecting a
+  prompt. A stop older than `stopped_continue_max_age_hours` (default 24) is
+  finished work and is left alone. / 被停止的回合（最新状态为 `interrupted`，
+  发送键显示为「继续」）通过与应用按钮相同的 RPC 接上，绝不注入 prompt；
+  超过 `stopped_continue_max_age_hours`（默认 24 小时）的停止视为已完成，
+  不再处理。
+- Each conversation has a machine-authoritative state that flips visibly on
+  its card: watching / running / waiting (quota, capacity, budget, blocked) /
+  stage done / resumed / completed / paused·stopped. Interrupted, stage-boundary
+  and truly-finished are distinguished from goal-DB status plus turn status,
+  not from prose. A completed guard stays on — tell the user they can leave it
+  or switch it off. Ordinary (goal-less) threads never claim completion; the
+  guard only reports that its resume was delivered. / 每个会话有一个由机器
+  事实决定的、卡片上可见翻转的状态：观察中 / 进行中 / 等待（额度、容量、
+  预算、受阻）/ 阶段完成 / 已续跑 / 已完成 / 暂停·停止。中断、阶段边界与
+  真正完成由 goal 数据库状态加回合状态区分，不看模型自述。会话完成后守护
+  保持开启——告诉用户可保留或关闭。普通（无 goal）会话不会宣称完成，守护
+  只报告它投递的续跑已生效。
+- The default resume prompt is safety-first (verify real state, no recap/redo,
+  three exits: continue / already done / needs a human, ask before
+  destructive work). Prefer it; only override for a specific reason. /
+  默认继续指令是安全优先的（先核验真实状态、不复述不重做、三个出口：继续 /
+  已完成 / 需要人，破坏性操作先询问）。优先使用默认值，只有明确理由才覆盖。
 - The daemon may run in dry-run mode (observes, never sends). Tell the user
   when `dry_run` is on in the status output. / 守护进程可能运行在 dry-run 模式
   （只观察、不发送）。状态输出里 `dry_run` 为真时要告知用户。
@@ -87,14 +122,22 @@ If the current conversation cannot be found, show the conversation list
   → open **http://127.0.0.1:8765** in the in-app browser (use your
   browser/navigation tool if available, or tell the user to click/open the URL
   — Codex opens links in the in-app browser by default). The panel shows every
-  recent conversation with guard toggles, weekly switches, per-resume
-  model/effort inputs and the quota windows. / 在应用内浏览器打开
-  **http://127.0.0.1:8765**（有浏览器/导航工具就直接打开，否则让用户点开链接；
-  Codex 默认在应用内打开）。面板展示每个近期会话的守护开关、跨周开关、
-  逐会话模型/强度设置以及额度窗口。
+  recent conversation with its live state badge, guard toggles, weekly
+  switches, per-resume model/effort inputs and the quota windows; hover a card
+  to pin or reorder it (drag its grip; drop above the divider to pin). /
+  在应用内浏览器打开 **http://127.0.0.1:8765**（有浏览器/导航工具就直接打开，
+  否则让用户点开链接；Codex 默认在应用内打开）。面板展示每个近期会话的实时
+  状态徽标、守护开关、跨周开关、逐会话模型/强度设置以及额度窗口；悬停卡片
+  可置顶或排序（拖动标题右侧的拖动柄；拖过分隔线上方即置顶）。
 
-If the tools report the control API is unreachable, the daemon is not running:
-tell the user to run `schtasks /Run /TN codex-autoresume` (Windows) or
-`codex-autoresume daemon` (any OS). / 若工具报告控制 API 不可达，说明守护进程
-未运行：让用户运行 `schtasks /Run /TN codex-autoresume`（Windows）或
-`codex-autoresume daemon`（任意系统）。
+If the tools report the control API is unreachable, the daemon is not running.
+Run `codex-autoresume doctor` first, then `codex-autoresume install` (idempotent;
+it also clears a legacy Windows logon task's 72-hour execution cap) or
+`schtasks /Run /TN codex-autoresume` (Windows). If the `codex-autoresume`
+command itself is missing, only the plugin is installed: run `pip install .`
+in the repository, then `codex-autoresume install`.
+若工具报告控制 API 不可达，说明守护进程未运行。先跑 `codex-autoresume doctor`，
+再执行 `codex-autoresume install`（幂等，同时清除旧版 Windows 登录任务默认的
+72 小时执行上限），或 `schtasks /Run /TN codex-autoresume`（Windows）。若
+`codex-autoresume` 命令本身不存在，说明只装了插件：在仓库里 `pip install .`，
+再执行 `codex-autoresume install`。

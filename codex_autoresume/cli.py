@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime
 
 from . import __version__
@@ -21,6 +22,26 @@ def _load(args):
 def _state_dir_from(args, cfg):
     d = getattr(args, "state_dir", None)
     return d or resolve_state_dir(cfg)
+
+
+def _panel_probe(host: str, port: int, timeout: float = 3.0) -> tuple[bool, str]:
+    """(reachable, version-or-error) for the local control panel."""
+    probe_host = "127.0.0.1" if host in ("", "0.0.0.0", "::") else host
+    if ":" in probe_host and not probe_host.startswith("["):
+        probe_host = "[%s]" % probe_host
+    url = "http://%s:%d/api/status" % (probe_host, port)
+    try:
+        import urllib.request
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(url, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        return True, str(data.get("version") or "?")
+    except Exception as e:
+        return False, str(e)[:120]
+
+
+def _probe_host(host: str) -> str:
+    return "127.0.0.1" if host in ("", "0.0.0.0", "::") else host
 
 
 # ---------------------------------------------------------------- commands
@@ -93,7 +114,7 @@ def cmd_watch(args) -> int:
     else:
         ids = [args.thread]
 
-    from .state import load_state, save_state, ThreadState
+    from .state import arm_thread, load_state, save_state, ThreadState
     state_dir = _state_dir_from(args, cfg)
     st = load_state(os.path.join(state_dir, "state.json"))
     applied = []
@@ -103,11 +124,8 @@ def cmd_watch(args) -> int:
             print("thread not found: %s" % tid)
             continue
         ts = st.thread(info.id)
-        ts.manual = True
-        ts.tracked = True
+        arm_thread(ts)
         ts.is_goal = bool(args.goal or ts.is_goal)
-        if not ts.last_kind:
-            ts.last_kind = "usage_primary"   # assume interrupted by quota
         applied.append(info.id)
         title = (info.name or info.title or "").replace("\n", " ")[:50]
         print("watching %s  %s" % (info.id, title))
@@ -246,8 +264,27 @@ def cmd_limits(args) -> int:
 
 def cmd_install(args) -> int:
     from .installer import install, status as inst_status
-    print(install(_state_dir_from(args, _load(args)) if not args.no_state_dir else None))
+    cfg = _load(args)
+    state_dir = _state_dir_from(args, cfg)
+    print(install(state_dir if not args.no_state_dir else None))
     print("runner status: %s" % inst_status())
+    cap = cfg["control_api"]
+    if cap["enabled"]:
+        port = int(cap["port"])
+        print("panel       : http://%s:%d/ ..." % (_probe_host(cap["host"]), port),
+              end="", flush=True)
+        deadline = time.monotonic() + 8.0
+        ok, detail = False, ""
+        while time.monotonic() < deadline:
+            ok, detail = _panel_probe(cap["host"], port)
+            if ok:
+                break
+            time.sleep(0.5)
+        if ok:
+            print(" reachable (v%s)" % detail)
+        else:
+            print(" not reachable yet — see %s"
+                  % os.path.join(state_dir, "daemon.log"))
     return 0
 
 
@@ -291,6 +328,31 @@ def cmd_doctor(args) -> int:
                   "reset times)" % e)
     print("      config      : %s" % cfg.get("_config_path"))
     print("      state dir   : %s" % _state_dir_from(args, cfg))
+    from .installer import status as inst_status, task_time_limit
+    print("      runner      : %s" % inst_status())
+    if os.name == "nt":
+        limit = task_time_limit()
+        if limit and limit.upper() != "PT0S":
+            print("[warn] runner cap  : %s — Windows stops the daemon after "
+                  "this; run `codex-autoresume install` (0.3.63+ clears it)"
+                  % limit)
+        elif limit == "PT0S":
+            print("[ok] runner cap  : unlimited")
+        else:
+            print("      runner cap  : n/a (no logon task)")
+    cap = cfg["control_api"]
+    if cap["enabled"]:
+        port = int(cap["port"])
+        okp, detail = _panel_probe(cap["host"], port)
+        if okp:
+            print("[ok] control api : http://%s:%d/ (v%s)"
+                  % (_probe_host(cap["host"]), port, detail))
+        else:
+            print("[warn] control api: http://%s:%d/ unreachable (%s) — run "
+                  "`codex-autoresume install`"
+                  % (_probe_host(cap["host"]), port, detail))
+    else:
+        print("      control api : disabled in config")
     print("[ok] all checks passed" if ok else "[FAIL] some checks failed")
     return 0 if ok else 1
 

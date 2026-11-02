@@ -1,6 +1,6 @@
 {
   "name": "codex-autoresume-guard",
-  "version": "0.3.62",
+  "version": "0.4.0",
   "description": "Control panel: http://127.0.0.1:8765 — auto-continue Codex conversations and goals after quota resets. / 控制面板：http://127.0.0.1:8765 —— 额度重置后自动继续 Codex 对话与 goal。",
   "author": {
     "name": "codex-autoresume contributors",
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "AutoResume Guard · Codex 守护",
     "shortDescription": "Control panel http://127.0.0.1:8765 — auto-continue conversations after usage-limit resets / 控制面板 http://127.0.0.1:8765 —— 额度重置后自动继续对话",
-    "longDescription": "Control panel URL: http://127.0.0.1:8765 — open it in the Codex sidebar browser (costs no quota; desktop shortcut also available after install).\n\nKeep long tasks and goals running unattended. When the ChatGPT usage limit interrupts a conversation, AutoResume Guard waits for the quota window to reset and continues it — goals via the official continue action, ordinary threads via a resume prompt — with your chosen model and reasoning effort per resume.\n\n控制面板地址：http://127.0.0.1:8765 —— 在 Codex 侧栏浏览器打开即可（不消耗额度；安装后也有桌面快捷方式）。\n\n让长任务与 goal 无人值守地跑下去。当 ChatGPT 额度限制打断对话时，Codex 守护会等待额度窗口重置并自动继续——goal 走官方继续动作，普通会话发送继续指令——每次自动继续都可指定模型与推理强度。",
+    "longDescription": "Control panel URL: http://127.0.0.1:8765 — open it in the Codex sidebar browser (costs no quota).\n\nKeep long tasks and goals running unattended. When the ChatGPT usage limit interrupts a conversation, AutoResume Guard waits for the quota window to reset and continues it — goals via the official continue action, ordinary threads via a resume prompt — with your chosen model and reasoning effort per resume.\n\n控制面板地址：http://127.0.0.1:8765 —— 在 Codex 侧栏浏览器打开即可（不消耗额度）。\n\n让长任务与 goal 无人值守地跑下去。当 ChatGPT 额度限制打断对话时，Codex 守护会等待额度窗口重置并自动继续——goal 走官方继续动作，普通会话发送继续指令——每次自动继续都可指定模型与推理强度。",
     "developerName": "codex-autoresume contributors",
     "category": "Developer Tools",
     "capabilities": [

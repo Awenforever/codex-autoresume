@@ -56,6 +56,11 @@ max_concurrent_resumes = 2
 # RPC the app's Continue button uses - never by sending a prompt.
 stopped_continue_sec = 60
 
+# A stop older than this is treated as finished work and left alone. Without
+# the cap a daemon restart would resurrect long-abandoned stopped turns.
+# 0 disables the cap.
+stopped_continue_max_age_hours = 24
+
 [resume]
 # "exec"  -> headless `codex exec resume` (supports model/effort overrides)
 # "queue" -> `codex queue` (delivered inside the desktop app; keeps the
@@ -64,6 +69,13 @@ mode = "exec"
 
 # Optional cheap probe turn before the real resume (adds one tiny turn).
 probe_first = false
+
+# Built-in resume prompts are short and safety-first: verify real state, no
+# recap/redo, three exits (continue / already done / needs a human), ask
+# before destructive work. Override only for a specific reason; both keys
+# default to the built-in prompt, so leave them commented out.
+# prompt_generic = "..."
+# prompt_goal = "..."
 
 # empty model/reasoning_effort = inherit the thread's own settings
 model = ""

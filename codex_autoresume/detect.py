@@ -114,14 +114,22 @@ def detect(state: CodexState, seen_sources: set[str],
 
 
 def seed_seen(state: CodexState, seen_sources: set[str],
-              watermark: int) -> tuple[set[str], int]:
-    """Cold start: treat every failure recorded before installation as seen.
+              watermark: int, up_to: int | None = None
+              ) -> tuple[set[str], int]:
+    """Cold start: treat failures recorded before the daemon as seen.
 
     Without this, a fresh watcher would ingest months of historical
     usage-limit failures and try to resume everything at once.
+
+    *up_to* limits seeding to failures at or before an already-persisted
+    watermark: those were ingested by an earlier run, while anything newer
+    (recorded while the daemon was down) must still flow through detection.
     """
     failures = state.failed_turns(since_completed_at=0, limit=100000)
     for f in failures:
+        if up_to is not None and (f.completed_at is None
+                                  or f.completed_at > up_to):
+            continue
         seen_sources.add("turn:%s" % f.turn_id)
         if f.completed_at and f.completed_at > watermark:
             watermark = f.completed_at

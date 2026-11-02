@@ -73,6 +73,94 @@ def _quote(argv: list[str]) -> str:
     return " ".join(argv.replace('"', '\\"') if " " in a else a for a in argv)
 
 
+# `schtasks /Create` gives ONLOGON tasks the default three-day execution
+# cap. The daemon is meant to run until logoff, so leaving it in place kills
+# the panel on day three with no daemon.log entry explaining why.
+_TASK_LIMIT_PS = (
+    "$ErrorActionPreference='Stop';"
+    "try {$t=Get-ScheduledTask -TaskName '%s' -ErrorAction Stop}"
+    "catch {'ABSENT'; exit 0};"
+    "$cur=$t.Settings.ExecutionTimeLimit;"
+    "if ($cur -eq 'PT0S' -or -not $cur) {'OK'; exit 0};"
+    "try {"
+    "$s=New-ScheduledTaskSettingsSet "
+    "-ExecutionTimeLimit ([TimeSpan]::Zero) "
+    "-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries "
+    "-StartWhenAvailable -MultipleInstances IgnoreNew;"
+    "Set-ScheduledTask -TaskName '%s' -Settings $s -ErrorAction Stop | Out-Null"
+    "} catch {'FAIL'; exit 0};"
+    "$now=(Get-ScheduledTask -TaskName '%s').Settings.ExecutionTimeLimit;"
+    "if ($now -eq 'PT0S' -or -not $now) {'OK'} else {'FAIL:' + $now}"
+)
+_TASK_LIMIT_READ_PS = (
+    "try {(Get-ScheduledTask -TaskName '%s' -ErrorAction Stop)"
+    ".Settings.ExecutionTimeLimit} catch {'ABSENT'}"
+)
+
+
+def _powershell(script: str, timeout: float = 30.0):
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    return subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive",
+         "-WindowStyle", "Hidden", "-Command", script],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=timeout, creationflags=flags)
+
+
+def _last_line(stdout: str | None) -> str:
+    lines = [ln.strip() for ln in (stdout or "").splitlines() if ln.strip()]
+    return lines[-1] if lines else ""
+
+
+def _ensure_task_unlimited_nt() -> bool | None:
+    try:
+        r = _powershell(_TASK_LIMIT_PS % (TASK_NAME, TASK_NAME, TASK_NAME))
+    except (OSError, subprocess.SubprocessError):
+        return False
+    token = _last_line(r.stdout)
+    if token == "OK":
+        return True
+    if token == "ABSENT":
+        return None
+    return False
+
+
+def ensure_task_unlimited() -> bool | None:
+    """Clear the logon task's 72h cap; None when the task is not installed."""
+    if os.name != "nt":
+        return None
+    return _ensure_task_unlimited_nt()
+
+
+def _task_time_limit_nt() -> str | None:
+    try:
+        r = _powershell(_TASK_LIMIT_READ_PS % TASK_NAME, timeout=15.0)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = _last_line(r.stdout)
+    return None if not value or value == "ABSENT" else value
+
+
+def task_time_limit() -> str | None:
+    """ExecutionTimeLimit of the logon task (e.g. ``PT72H``), or None."""
+    if os.name != "nt":
+        return None
+    return _task_time_limit_nt()
+
+
+def repair_runner_limit(state_dir: str) -> bool | None:
+    """Best-effort cap repair for the canonical instance only."""
+    from .config import default_state_dir
+    try:
+        canonical = (os.path.abspath(state_dir)
+                     == os.path.abspath(default_state_dir()))
+    except OSError:
+        return None
+    if not canonical:
+        return None
+    return ensure_task_unlimited()
+
+
 def install(state_dir: str | None = None) -> str:
     system = platform.system()
     if system == "Windows":
@@ -203,14 +291,39 @@ def _install_windows(state_dir: str | None) -> str:
                                    ".codex-autoresume")
     launcher = _write_launcher(sd)
     cmd = '"%s" "%s"' % (_pythonw(), launcher)
+    create = ["schtasks", "/Create", "/TN", TASK_NAME, "/TR", cmd,
+              "/SC", "ONLOGON", "/F"]
     out = subprocess.run(
-        ["schtasks", "/Create", "/TN", TASK_NAME, "/TR", cmd,
-         "/SC", "ONLOGON", "/F"],
+        create,
         capture_output=True, text=True, encoding="utf-8", errors="replace")
     if out.returncode == 0:
-        subprocess.run(["schtasks", "/Run", "/TN", TASK_NAME], capture_output=True)
-        return ("scheduled task '%s' created at logon and started now "
-                "(runs: %s)" % (TASK_NAME, cmd))
+        if ensure_task_unlimited() is True:
+            subprocess.run(["schtasks", "/Run", "/TN", TASK_NAME],
+                           capture_output=True)
+            return ("scheduled task '%s' created at logon, 72h execution "
+                    "cap cleared, and started now (runs: %s)"
+                    % (TASK_NAME, cmd))
+        # The default cap would kill the daemon after three days. The
+        # Startup shortcut has no such cap, so prefer it when the task
+        # cannot be uncapped (e.g. a locked-down machine).
+        subprocess.run(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"],
+                       capture_output=True)
+        _start_detached([_pythonw(), launcher])
+        if _create_startup_shortcut(_pythonw(), '"%s"' % launcher):
+            return ("logon task could not be uncapped (Windows default 72h); "
+                    "removed it and installed Startup shortcut '%s' instead, "
+                    "daemon started now (runs: %s)"
+                    % (_startup_lnk_path(), cmd))
+        # Keep at least one autostart path; the next install can retry.
+        subprocess.run(
+            create,
+            capture_output=True, text=True, encoding="utf-8", errors="replace")
+        subprocess.run(["schtasks", "/Run", "/TN", TASK_NAME],
+                       capture_output=True)
+        return ("could not clear the logon task's 72h cap and the Startup "
+                "shortcut failed; daemon started now, but Windows will stop "
+                "it after 3 days — re-run `codex-autoresume install` "
+                "(runs: %s)" % cmd)
     # ONLOGON tasks can require elevation on locked-down machines; fall
     # back to a per-user Startup shortcut + start the daemon right now.
     _start_detached([_pythonw(), launcher])

@@ -276,7 +276,9 @@ class TestDaemonCapacityPrompt(_DaemonHarness):
         self.assertEqual(argv[0], "exec")
         self.assertEqual(argv[1], "resume")
         self.assertEqual(argv[2], "t-plain-thread")
-        self.assertIn("Continue the unfinished task", argv[3])
+        self.assertIn("Resume the interrupted task where it stopped",
+                      argv[3])
+        self.assertIn("Verify the actual state", argv[3])
 
 
 class TestDaemonStoppedTurn(_DaemonHarness):
@@ -316,6 +318,191 @@ class TestDaemonStoppedTurn(_DaemonHarness):
         self.assertEqual(t.resume_count_today, 1)
         # continue must never go through exec/queue (that would inject a
         # prompt); the fake records every exec/queue invocation here
+        self.assertFalse(os.path.exists(argv_log))
+
+
+class TestDaemonAdoptsPreWatchInterruption(_DaemonHarness):
+    """A quota failure recorded BEFORE the guard was enabled is resumed.
+
+    Cold start seeds such failures as seen, so no event ever fires for them;
+    the armed thread must adopt its newest failed turn instead of guessing.
+    """
+
+    THREAD_ID = "t-plain-thread"
+
+    def fixture_rows(self, now):
+        from datetime import datetime, timedelta
+        from tests.test_detect import err_payload, NOW_S
+        ended = int(now) - 3 * 86400
+        reset = datetime.fromtimestamp(ended).astimezone() + timedelta(hours=1)
+        turns = [
+            ("t-plain-thread", "turn-before-watch", "failed",
+             err_payload("usageLimitExceeded",
+                         "You've hit your usage limit. ... try again at %s."
+                         % reset.strftime("%I:%M %p")),
+             NOW_S, ended),
+        ]
+        return turns, None
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(self.state_dir, exist_ok=True)
+        import json as _json
+        with open(os.path.join(self.state_dir, "state.json"), "w",
+                  encoding="utf-8") as f:
+            _json.dump({"version": 1,
+                        "threads": {self.THREAD_ID: {"manual": True,
+                                                     "tracked": True}},
+                        "seen_sources": ["turn:turn-before-watch"],
+                        "turns_watermark": int(self.now) - 60}, f)
+
+    def test_armed_thread_adopts_the_real_failure(self):
+        argv_log = os.path.join(self.root, "argv.jsonl")
+        out = self.run_daemon({"FAKE_CODEX_ARGV_LOG": argv_log})
+        self.assertEqual(out.returncode, 0,
+                         msg=(out.stdout + out.stderr)[-3000:])
+        st, t = self.thread_state()
+        if t is None or t.last_outcome != "success":
+            out = self.run_daemon({"FAKE_CODEX_ARGV_LOG": argv_log})
+            self.assertEqual(out.returncode, 0,
+                             msg=(out.stdout + out.stderr)[-3000:])
+            st, t = self.thread_state()
+        self.assertIsNotNone(t)
+        self.assertEqual(t.last_outcome, "success")
+        self.assertEqual(t.success_resumes, 1)
+        self.assertEqual(t.last_turn_id, "turn-before-watch")
+        # the real (already passed) reset time was adopted, so the resume
+        # was due immediately instead of waiting for a guessed window
+        self.assertEqual(t.last_kind, "")
+        with open(argv_log, encoding="utf-8") as f:
+            argv = json.loads(f.readline())
+        self.assertEqual(argv[1], "resume")
+        self.assertEqual(argv[2], "t-plain-thread")
+
+
+class TestDaemonIgnoresSupersededFailure(_DaemonHarness):
+    """A failure that a later completed turn superseded is not resumed."""
+
+    THREAD_ID = "t-plain-thread"
+
+    def fixture_rows(self, now):
+        from tests.test_detect import err_payload, NOW_S
+        turns = [
+            ("t-plain-thread", "turn-old-fail", "failed",
+             err_payload("usageLimitExceeded",
+                         "You've hit your usage limit."),
+             NOW_S, int(now) - 3 * 86400),
+            ("t-plain-thread", "turn-done", "completed", None,
+             int(now) - 3 * 86400 + 60, int(now) - 2 * 86400),
+        ]
+        return turns, None
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(self.state_dir, exist_ok=True)
+        import json as _json
+        with open(os.path.join(self.state_dir, "state.json"), "w",
+                  encoding="utf-8") as f:
+            _json.dump({"version": 1,
+                        "threads": {self.THREAD_ID: {
+                            "manual": True, "tracked": True,
+                            "last_kind": "usage_primary",
+                            "last_turn_id": "turn-old-fail"}},
+                        "seen_sources": ["turn:turn-old-fail"],
+                        "turns_watermark": int(self.now) - 60}, f)
+
+    def test_no_prompt_into_a_finished_conversation(self):
+        argv_log = os.path.join(self.root, "argv.jsonl")
+        out = self.run_daemon({"FAKE_CODEX_ARGV_LOG": argv_log})
+        self.assertEqual(out.returncode, 0,
+                         msg=(out.stdout + out.stderr)[-3000:])
+        st, t = self.thread_state()
+        self.assertIsNotNone(t)
+        self.assertEqual(t.last_kind, "")
+        self.assertIsNone(t.last_reset_at)
+        self.assertEqual(t.total_resumes, 0)
+        self.assertEqual(t.last_outcome, "")
+        self.assertFalse(os.path.exists(argv_log))
+
+
+class TestDaemonIgnoresOldStoppedTurn(_DaemonHarness):
+    """An interrupted turn from days ago is a finished conversation."""
+
+    THREAD_ID = "t-plain-thread"
+
+    def fixture_rows(self, now):
+        ended = int(now) - 4 * 86400
+        turns = [
+            ("t-plain-thread", "turn-old-stop", "interrupted", None,
+             ended, ended + 120),
+        ]
+        return turns, None
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(self.state_dir, exist_ok=True)
+        import json as _json
+        with open(os.path.join(self.state_dir, "state.json"), "w",
+                  encoding="utf-8") as f:
+            _json.dump({"version": 1,
+                        "threads": {self.THREAD_ID: {"tracked": True}},
+                        "seen_sources": [],
+                        "turns_watermark": int(self.now) - 7200}, f)
+
+    def test_old_stop_is_not_continued(self):
+        argv_log = os.path.join(self.root, "argv.jsonl")
+        out = self.run_daemon({"FAKE_CODEX_ARGV_LOG": argv_log})
+        self.assertEqual(out.returncode, 0,
+                         msg=(out.stdout + out.stderr)[-3000:])
+        st, t = self.thread_state()
+        self.assertIsNotNone(t)
+        self.assertEqual(t.last_outcome, "")
+        self.assertIsNone(t.continued_turn_id)
+        self.assertEqual(t.total_resumes, 0)
+        self.assertFalse(os.path.exists(argv_log))
+
+
+class TestDaemonWeeklyPolicyDisarms(_DaemonHarness):
+    """With weekly guarding off, a weekly interruption stops the guard."""
+
+    THREAD_ID = "t-plain-thread"
+
+    def fixture_rows(self, now):
+        from datetime import datetime, timedelta
+        from tests.test_detect import err_payload, NOW_S
+        reset = datetime.fromtimestamp(int(now)).astimezone() + timedelta(days=3)
+        turns = [
+            ("t-plain-thread", "turn-weekly", "failed",
+             err_payload("usageLimitExceeded",
+                         "You've hit your usage limit. ... try again at %s."
+                         % reset.strftime("%b %d, %Y %I:%M %p")),
+             NOW_S, int(now) - 3600),
+        ]
+        return turns, None
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(self.state_dir, exist_ok=True)
+        import json as _json
+        with open(os.path.join(self.state_dir, "state.json"), "w",
+                  encoding="utf-8") as f:
+            _json.dump({"version": 1,
+                        "threads": {self.THREAD_ID: {"manual": True,
+                                                     "tracked": True}},
+                        "seen_sources": ["turn:turn-weekly"],
+                        "turns_watermark": int(self.now) - 60}, f)
+
+    def test_weekly_off_disarms_instead_of_waiting_forever(self):
+        argv_log = os.path.join(self.root, "argv.jsonl")
+        out = self.run_daemon({"FAKE_CODEX_ARGV_LOG": argv_log})
+        self.assertEqual(out.returncode, 0,
+                         msg=(out.stdout + out.stderr)[-3000:])
+        st, t = self.thread_state()
+        self.assertIsNotNone(t)
+        self.assertFalse(t.tracked)
+        self.assertFalse(t.manual)
+        self.assertEqual(t.last_kind, "usage_weekly")
+        self.assertEqual(t.total_resumes, 0)
         self.assertFalse(os.path.exists(argv_log))
 
 

@@ -106,6 +106,19 @@ class Daemon:
         logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO,
                             format=fmt, handlers=handlers, force=True)
 
+    def _repair_runner_limit(self) -> None:
+        """Undo the Windows logon task's default 72h cap (canonical only)."""
+        try:
+            from .installer import repair_runner_limit
+            state = repair_runner_limit(self.state_dir)
+            if state is True:
+                log.info("cleared the Windows logon task's 72h execution cap")
+            elif state is False:
+                log.warning("could not clear the Windows logon task's 72h "
+                            "execution cap; re-run `codex-autoresume install`")
+        except Exception:
+            log.debug("runner execution cap check failed", exc_info=True)
+
     def run(self, once: bool = False) -> int:
         self.setup_logging()
         lock = InstanceLock(self.lock_path)
@@ -130,12 +143,21 @@ class Daemon:
                 except OSError as e:
                     log.warning("control api failed to start: %s", e)
                     control = None
-            first_run = not self.state.seen_sources and not self.state.turns_watermark
+            if os.name == "nt" and not once:
+                threading.Thread(target=self._repair_runner_limit,
+                                 name="cxr-runner-limit",
+                                 daemon=True).start()
+            first_run = not self.state.seen_sources
             if first_run:
                 from .detect import seed_seen
                 codex = CodexState(self.codex_home)
+                # with a persisted watermark, only history at or below it
+                # is "already ingested"; newer failures happened while the
+                # daemon was down and must still be detected
+                cutoff = self.state.turns_watermark or None
                 self.state.seen_sources, self.state.turns_watermark = seed_seen(
-                    codex, self.state.seen_sources, self.state.turns_watermark)
+                    codex, self.state.seen_sources, self.state.turns_watermark,
+                    up_to=cutoff)
                 log.info("cold start: seeded %d pre-existing failures as seen "
                          "(watermark=%d)", len(self.state.seen_sources),
                          self.state.turns_watermark)
@@ -200,25 +222,43 @@ class Daemon:
                         since_completed_at=self.state.turns_watermark, now=now)
         for e in events:
             self.state.seen_sources.add(e.source)
-            if e.source.startswith("turn:") and e.thread_id:
-                pass
         self._bump_watermark(codex)
         if events:
             log.info("detected %d new interruption event(s): %s", len(events),
                      [(e.thread_id[:8], e.kind) for e in events])
 
-        goal_threads = {g["thread_id"] for g in codex.goals()
-                        if g.get("status") in ("usage_limited", "budget_limited",
-                                               "blocked")}
+        goal_statuses = {g["thread_id"]: g.get("status")
+                         for g in codex.goals()}
+        goal_threads = {tid for tid, status in goal_statuses.items()
+                        if status in ("usage_limited", "budget_limited",
+                                      "blocked")}
         busy = codex.busy_threads()
+        latest = self._latest_turns(codex)
+
+        # Explicitly armed conversations: an interruption recorded before
+        # the guard was enabled is seeded as history at cold start, so no
+        # event will ever fire for it. Adopt the newest failed turn as the
+        # cause (with its own kind, reset time and message) instead of
+        # guessing one.
+        adopted = self._adopt_armed_failures(latest, goal_threads, now)
+        if adopted:
+            events.extend(adopted)
 
         # fold new events into thread states FIRST: the interruption's own
         # reset time is first-hand evidence and must be on record even when
-        # the snapshot fetch fails
+        # the snapshot fetch fails. Oldest first: when one tick ingests a
+        # backlog, the NEWEST failure must win.
         capacity_threads = {e.thread_id for e in events
                             if e.kind == "server_overloaded"}
-        for e in events:
+        turn_events = sorted(
+            (e for e in events if e.source.startswith("turn:")),
+            key=lambda e: e.occurred_at.timestamp() if e.occurred_at else 0.0)
+        goal_event_list = [e for e in events
+                           if not e.source.startswith("turn:")]
+        for e in turn_events + goal_event_list:
             t = self.state.thread(e.thread_id)
+            if e.source.startswith("turn:"):
+                t.last_turn_id = e.source[len("turn:"):]
             if e.kind == "goal_limited" or e.thread_id in goal_threads:
                 t.is_goal = True
             if e.kind == "goal_limited" and e.thread_id in capacity_threads:
@@ -234,6 +274,23 @@ class Daemon:
                 t.last_reset_at = e.reset_at.isoformat()
             self._maybe_track(t, e)
 
+        # a newer turn (completed by the user, or stopped) retires the
+        # interruption: injecting a prompt now would append an unwanted
+        # turn to work that already moved on
+        self._drop_superseded_interruptions(latest)
+
+        # only events that still own their thread may assert a window limit:
+        # a backlog of historical failures must not block the whole account
+        live_events = []
+        for e in events:
+            t = self.state.threads.get(e.thread_id)
+            if t is None or not t.last_kind:
+                continue
+            if (e.source.startswith("turn:")
+                    and t.last_turn_id != e.source[len("turn:"):]):
+                continue
+            live_events.append(e)
+
         # re-derive the window limit from persisted thread evidence (state
         # written before the field existed, or a crash between the two)
         self._restore_limit_evidence()
@@ -244,11 +301,11 @@ class Daemon:
         new_limit_evidence = any(
             e.kind in ("usage_primary", "usage_weekly")
             or (e.kind == "goal_limited" and e.goal_status == "usage_limited")
-            for e in events)
+            for e in live_events)
         raw = self._quota_snapshot(
             force=new_limit_evidence or self._need_snapshot())
         self._reconcile_limit(raw)
-        self._note_limit_evidence(events, raw)
+        self._note_limit_evidence(live_events, raw)
         snapshot = self._effective_snapshot(raw)
         self._maybe_consume_reset_card(snapshot)
 
@@ -312,7 +369,14 @@ class Daemon:
                                if decision.wake_at else None)
             if decision.action == "untrack":
                 t.tracked = False
-                log.info("untracked %s: %s", thread_id[:8], decision.reason)
+                t.manual = False
+                t.next_wake_iso = None
+                t.phase = "stopped"
+                t.phase_reason = "weekly"
+                t.phase_at = now.isoformat(timespec="seconds")
+                t.phase_turn_id = None
+                log.info("stopped guarding %s: %s", thread_id[:8],
+                         decision.reason)
                 continue
             if decision.action == "due":
                 # exec resume does NOT inherit the thread's model/effort by
@@ -333,11 +397,18 @@ class Daemon:
 
         # stopped-turn candidates: guarded, non-goal threads with no quota
         # interruption already waiting. Only the newest turn counts, so a
-        # conversation continued by the user is never touched again.
+        # conversation continued by the user is never touched again. An
+        # old stop is a finished conversation, not something to resurrect.
+        max_stop_age_h = float(
+            self.cfg["general"].get("stopped_continue_max_age_hours", 24) or 0)
         if self._active_limit() is None:
             for tid, s in stopped.items():
                 th = self.state.threads.get(tid)
                 if th is None or not th.tracked or th.is_goal:
+                    continue
+                if (max_stop_age_h > 0 and s.stopped_at is not None
+                        and now.timestamp() - s.stopped_at
+                        > max_stop_age_h * 3600):
                     continue
                 if th.last_kind:
                     # a quota/capacity interruption owns this thread; when
@@ -355,6 +426,7 @@ class Daemon:
                              None, None, s))
 
         self._launch_jobs(jobs, busy)
+        self._refresh_phases(latest, goal_statuses, busy, now)
 
         # warm slow external caches off the HTTP path: /api/status serves
         # cache-only, so the panel can never hang on external fetches
@@ -374,6 +446,236 @@ class Daemon:
         if self.cfg["general"]["auto_track"]:
             t.tracked = True
             log.info("tracking thread %s (%s)", e.thread_id[:8], e.kind)
+
+    def _latest_turns(self, codex: CodexState) -> dict:
+        """Newest turn per thread; a failed scan must not stop the tick."""
+        try:
+            return codex.latest_turns()
+        except Exception as e:
+            log.warning("latest-turn scan failed: %s", e)
+            return {}
+
+    def _adopt_armed_failures(self, latest, goal_threads, now):
+        """Adopt the real interruption behind an explicitly armed thread.
+
+        Cold start marks every historical failure as seen, so a conversation
+        interrupted BEFORE the guard was enabled would otherwise never be
+        resumed. Only a manually armed, non-goal thread qualifies, and only
+        while the failure is still the thread's newest turn. Adopting its
+        kind/reset/message replaces the old guess (``usage_primary`` with no
+        evidence), which could neither classify a weekly window nor know
+        when the account became usable again.
+        """
+        from .detect import classify_failures
+        adopted = []
+        for thread_id, t in list(self.state.threads.items()):
+            if not t.manual or t.is_goal or thread_id in goal_threads:
+                continue
+            lt = latest.get(thread_id)
+            if lt is None or lt.status != "failed":
+                continue
+            if t.last_turn_id == lt.turn_id and t.last_kind:
+                continue
+            events = classify_failures([lt.as_failure()], now=now)
+            if not events:
+                continue
+            e = events[0]
+            self.state.seen_sources.add(e.source)
+            adopted.append(e)
+            log.info("adopted pre-existing %s interruption of %s (turn %s)",
+                     e.kind, thread_id[:8], lt.turn_id[:8])
+        return adopted
+
+    def _drop_superseded_interruptions(self, latest) -> None:
+        """Forget quota evidence that a newer turn has made obsolete.
+
+        A completed newest turn means the user continued the conversation
+        themselves; an interrupted newest turn is the Stop-button case the
+        Continue path owns. Either way an injected prompt would append an
+        unwanted turn to work that already moved on.
+        """
+        dropped = False
+        for thread_id, t in list(self.state.threads.items()):
+            if not (t.tracked or t.manual) or t.is_goal or not t.last_kind:
+                continue
+            lt = latest.get(thread_id)
+            if lt is None or lt.status not in ("completed", "interrupted"):
+                continue
+            log.info("%s newest turn is %s; dropping stale %s interruption%s",
+                     thread_id[:8], lt.status, t.last_kind,
+                     " (Continue path takes over)"
+                     if lt.status == "interrupted" else "")
+            t.last_kind = ""
+            t.last_reset_at = None
+            t.next_wake_iso = None
+            dropped = True
+        if dropped and not self._limit_backed_by_threads():
+            # the block was this stale evidence's only claim; a newer turn
+            # proved the account usable, so it must not defer other threads
+            self._clear_limit()
+
+    # -------------------------------------------------------------- phases
+    #
+    # Authoritative signals only:
+    #   goal status complete / usage_limited / budget_limited / blocked
+    #   turn status completed / failed / interrupted / inProgress
+    # A completed turn additionally needs a final_answer item (the turn
+    # really delivered a message), and an ordinary conversation is NEVER
+    # declared "complete" -- a turn boundary only returns control to the
+    # user. The panel therefore shows a stable delivery/completion flip
+    # instead of trying to guess task semantics from prose.
+
+    def _capture_resume_floor(self, thread_id: str, t) -> None:
+        """Remember the newest turn before a resume: the first completed
+        turn after it is the guard's delivery."""
+        try:
+            lt = CodexState(self.codex_home).latest_turn(thread_id)
+            t.resume_floor_turn_id = lt.turn_id if lt is not None else ""
+            t.resume_floor_open = bool(lt is not None
+                                       and lt.status != "completed")
+        except Exception:
+            t.resume_floor_turn_id = ""
+            t.resume_floor_open = False
+        t.delivered_turn_id = None
+
+    @staticmethod
+    def _note_delivery(t, lt, goal_status) -> None:
+        if not (t.tracked or t.manual) or goal_status is not None or t.is_goal:
+            return       # goal threads use the authoritative goal status
+        if t.delivered_turn_id is not None or t.resume_floor_turn_id is None:
+            return
+        if lt is None or lt.status != "completed" or not lt.final_answer:
+            return
+        if lt.turn_id == t.resume_floor_turn_id and not t.resume_floor_open:
+            return
+        t.delivered_turn_id = lt.turn_id
+
+    def _phase_of(self, thread_id: str, t, goal_status, lt, busy):
+        if not (t.tracked or t.manual):
+            if t.phase == "stopped":
+                return "stopped", t.phase_reason
+            return "off", ""
+        if self.state.paused:
+            return "paused", "all"
+        if goal_status == "complete":
+            return "completed", "goal"
+        # a cleared goal row must not silently undo the completion flip;
+        # only new work (a newer turn) or re-arming resets it
+        if (t.phase == "completed" and goal_status is None
+                and (lt is None or lt.turn_id == t.phase_turn_id)):
+            return "completed", "goal"
+        if goal_status in ("usage_limited", "budget_limited", "blocked"):
+            if goal_status == "budget_limited":
+                return "waiting", "budget"
+            if goal_status == "blocked":
+                return "waiting", "blocked"
+            return "waiting", "quota"
+        if goal_status == "paused":
+            return "paused", "goal"
+        with self._inflight_lock:
+            inflight = thread_id in self._inflight
+        if inflight:
+            return "running", "resume"
+        if t.last_kind:
+            if t.last_kind == "server_overloaded":
+                return "waiting", "capacity"
+            return "waiting", "quota"
+        if goal_status is not None:
+            if thread_id in busy:
+                return "running", "goal"
+            if lt is not None and lt.status == "completed":
+                return "stage", "goal"
+            return "watching", ""
+        if thread_id in busy:
+            return "running", ""
+        if (t.delivered_turn_id is not None and lt is not None
+                and lt.turn_id == t.delivered_turn_id
+                and lt.status == "completed"):
+            return "delivered", ""
+        return "watching", ""
+
+    def _refresh_phases(self, latest, goal_statuses, busy, now) -> None:
+        for thread_id, t in list(self.state.threads.items()):
+            lt = latest.get(thread_id)
+            goal_status = goal_statuses.get(thread_id)
+            self._note_delivery(t, lt, goal_status)
+            phase, reason = self._phase_of(
+                thread_id, t, goal_status, lt, busy)
+            if phase == "off":
+                if t.phase or t.phase_reason or t.phase_at:
+                    t.phase = ""
+                    t.phase_reason = ""
+                    t.phase_at = None
+                    t.phase_turn_id = None
+                continue
+            if phase == t.phase and reason == t.phase_reason:
+                continue
+            prev = t.phase
+            t.phase = phase
+            t.phase_reason = reason
+            t.phase_at = now.isoformat(timespec="seconds")
+            if phase in ("completed", "stage", "delivered"):
+                t.phase_turn_id = lt.turn_id if lt is not None else None
+            log.info("%s guard phase %s -> %s%s", thread_id[:8],
+                     prev or "off", phase,
+                     (" (%s)" % reason) if reason else "")
+            if phase == "completed" and prev != "completed":
+                t.append_history({"at": now.isoformat(),
+                                  "kind": "goal_complete", "ok": True})
+                self._notify(thread_id, "goal_complete")
+            elif phase == "delivered" and prev != "delivered":
+                t.append_history({"at": now.isoformat(),
+                                  "kind": "delivered", "ok": True})
+
+    def _limit_backed_by_threads(self) -> bool:
+        now = _now()
+        for t in self.state.threads.values():
+            if not (t.tracked or t.manual):
+                continue
+            if t.last_kind == "goal_limited":
+                # goal rows carry no reset time; only the snapshot gates them
+                return True
+            if not t.last_reset_at:
+                continue
+            if t.last_kind not in ("usage_primary", "usage_weekly"):
+                continue
+            try:
+                if datetime.fromisoformat(t.last_reset_at) > now:
+                    return True
+            except ValueError:
+                continue
+        return False
+
+    def _interruption_still_owns_thread(self, thread_id: str, t) -> bool:
+        """Send-time recheck of the newest turn (the user may have moved on)."""
+        from .codexenv import CodexState as _CS
+        try:
+            codex = _CS(self.codex_home)
+            lt = codex.latest_turn(thread_id)
+            if lt is None or lt.status == "failed":
+                return True
+            if lt.status == "inProgress":
+                if thread_id in codex.busy_threads():
+                    log.info("%s resume deferred: its turn went live",
+                             thread_id[:8])
+                    t.next_wake_iso = (_now() + timedelta(
+                        seconds=self.cfg["general"]["poll_interval_sec"]
+                    )).isoformat()
+                    return False
+                return True
+            if lt.status in ("completed", "interrupted"):
+                log.info("%s resume cancelled at send time: newest turn is %s",
+                         thread_id[:8], lt.status)
+                t.last_kind = ""
+                t.last_reset_at = None
+                t.next_wake_iso = None
+                save_state(self.state)
+                return False
+            return True
+        except Exception as e:
+            log.warning("%s resume cancelled: cannot verify the newest turn "
+                        "(%s)", thread_id[:8], e)
+            return False
 
     def _synthetic_event(self, thread_id: str, t, snapshot):
         from .detect import InterruptionEvent
@@ -879,6 +1181,17 @@ class Daemon:
         for e in events:
             if e.kind in ("usage_primary", "usage_weekly"):
                 window = "weekly" if e.kind == "usage_weekly" else "primary"
+                # an interruption only describes the window it happened in:
+                # when its reset boundary is already past AND that whole
+                # window has provably ended, the account is usable again and
+                # the event must not assert a block (a failure adopted from
+                # days ago would otherwise blind-block a healthy account)
+                horizon = (timedelta(days=7) if window == "weekly"
+                           else timedelta(hours=6))
+                if (e.reset_at is not None and e.reset_at <= now
+                        and e.occurred_at is not None
+                        and now - e.occurred_at > horizon):
+                    continue
                 if e.reset_at is not None and e.reset_at > now:
                     self._set_limit(window, e.reset_at)
                     continue
@@ -1142,6 +1455,25 @@ class Daemon:
             if cur is None:
                 st.threads[tid] = ts
             else:
+                if ts.manual and not cur.manual:
+                    # explicit re-arm via the CLI: retry from a clean slate
+                    cur.fail_streak = 0
+                    cur.overload_streak = 0
+                    cur.next_wake_iso = None
+                    cur.phase = "watching"
+                    cur.phase_reason = ""
+                    cur.phase_at = None
+                    cur.phase_turn_id = None
+                    cur.resume_floor_turn_id = None
+                    cur.resume_floor_open = False
+                    cur.delivered_turn_id = None
+                elif (not ts.tracked and not ts.manual
+                      and (cur.tracked or cur.manual)):
+                    # external unwatch: the user turned guarding off
+                    cur.phase = ""
+                    cur.phase_reason = ""
+                    cur.phase_at = None
+                    cur.phase_turn_id = None
                 cur.manual = ts.manual
                 cur.guard_weekly = ts.guard_weekly
                 cur.guard_model = ts.guard_model
@@ -1314,6 +1646,7 @@ class Daemon:
                 save_state(self.state)
                 return
             from .ratelimits import TurnBusyError, turn_continue
+            self._capture_resume_floor(thread_id, t)
             try:
                 # no model/effort override: the app's Continue button keeps
                 # the conversation's own settings, and so do we
@@ -1378,6 +1711,7 @@ class Daemon:
                          "(ambiguous)", len(cands))
                 return False
             from .uia import click_continue
+            self._capture_resume_floor(thread_id, t)
             res = click_continue(["Continue", "继续", "Resume", "恢复"])
             if not res.get("clicked"):
                 log.info("uia Continue (turn) not clickable: %s",
@@ -1462,6 +1796,9 @@ class Daemon:
                 # if the RPC path fails (retry later instead)
                 self._goal_resume(thread_id, t, decision)
                 return
+            if not self._interruption_still_owns_thread(thread_id, t):
+                return
+            self._capture_resume_floor(thread_id, t)
             tried: list[str] = []
             model = decision.model
             for attempt in range(
@@ -1571,6 +1908,7 @@ class Daemon:
                     seconds=self.cfg["general"]["poll_interval_sec"])).isoformat()
                 save_state(self.state)
                 return True
+            self._capture_resume_floor(thread_id, t)
             result = goal_continue(self.codex_bin, thread_id,
                                    model=decision.model,
                                    effort=decision.reasoning_effort)
@@ -1653,6 +1991,7 @@ class Daemon:
                          len(limited))
                 return False
             from .uia import click_continue
+            self._capture_resume_floor(thread_id, t)
             res = click_continue()
             if not res.get("clicked"):
                 log.info("uia Continue not clickable: %s", res.get("detail"))
@@ -1705,6 +2044,12 @@ class Daemon:
                      outcome.duration_sec)
         else:
             t.last_error = outcome.kind
+            if outcome.kind != "overloaded":
+                # capacity retries keep the floor (the same delivery is
+                # still pending); a terminal failure must not let an
+                # unrelated later turn look like the guard's delivery
+                t.resume_floor_turn_id = None
+                t.resume_floor_open = False
             if outcome.kind == "writer_conflict":
                 # contention with the desktop app, not a real failure:
                 # retry later without counting toward the park threshold

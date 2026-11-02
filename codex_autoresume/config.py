@@ -21,20 +21,29 @@ except ImportError:  # pragma: no cover
 
 APP_DIR_NAME = ".codex-autoresume"
 
+# Three exits, always: continue / already done / needs a human. The model
+# must re-verify real state after the pause (memory of the transcript is
+# stale), must not recap or redo, and must not mistake "finished my turn"
+# for "finished the task". The last line keeps the model from answering an
+# automated nudge conversationally instead of doing the work.
 DEFAULT_PROMPT_GOAL = (
-    "Your previous turn was interrupted because the account usage limit was "
-    "exhausted. The quota window has now reset. Continue pursuing the thread "
-    "goal from where it stopped."
+    "Resume the interrupted goal where it stopped. Verify the actual state "
+    "first (files, git status, last output) instead of trusting the "
+    "transcript; no recap, no redoing finished work. The goal is complete "
+    "only when its acceptance check actually passes - run it, don't assume "
+    "it. If it is already done, say so and stop. If it cannot pass, report "
+    "the failing check and stop. If the next step is destructive or needs a "
+    "human decision, ask first. Automated message - act, don't reply "
+    "conversationally."
 )
 
-# Kept deliberately minimal: the resumed thread re-reads its whole context
-# anyway, so the prompt must only (1) tell the model to continue exactly
-# where it stopped and (2) suppress the expensive failure modes -- progress
-# recaps, re-confirmation questions, redoing finished steps.
 DEFAULT_PROMPT_GENERIC = (
-    "Continue the unfinished task from exactly where it stopped. Do not "
-    "summarize or restate progress, do not ask for confirmation, and do "
-    "not redo completed steps."
+    "Resume the interrupted task where it stopped. Verify the actual state "
+    "first (files, git status, last output) instead of trusting the "
+    "transcript; no recap, no redoing finished work. If it is already done, "
+    "say so and stop. If the next step is destructive or needs a human "
+    "decision, ask first. Automated message - act, don't reply "
+    "conversationally."
 )
 
 DEFAULTS: dict[str, Any] = {
@@ -90,6 +99,10 @@ DEFAULTS: dict[str, Any] = {
         # once the turn has been idle this long (0 disables nothing; it is
         # a settle window so a just-pressed Stop is not fought instantly)
         "stopped_continue_sec": 60,
+        # do not resurrect a stop older than this: a conversation left
+        # interrupted days ago was finished by the user, not paused
+        # (0 disables the cap)
+        "stopped_continue_max_age_hours": 24,
     },
     "resume": {
         # "exec"  -> codex exec resume <id> "<prompt>" (supports model overrides)

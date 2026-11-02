@@ -96,6 +96,21 @@ def _latest_db(codex_home: str, prefix: str) -> str:
     return max(hits, key=lambda p: (os.path.getmtime(p), p))
 
 
+def _error_fields(error_json: str | None) -> tuple[str, str]:
+    """(codexErrorInfo, message) from a thread_turns.error_json blob."""
+    if not error_json:
+        return "", ""
+    try:
+        payload = json.loads(error_json)
+    except (ValueError, TypeError):
+        payload = {"message": str(error_json)[:500]}
+    if not isinstance(payload, dict):
+        return "", ""
+    info = str(payload.get("codexErrorInfo")
+               or payload.get("codex_error_info") or "")
+    return info, str(payload.get("message") or "")
+
+
 # ---------------------------------------------------------------- turn scans
 
 @dataclass
@@ -130,6 +145,37 @@ class StoppedTurn:
     thread_id: str
     turn_id: str
     stopped_at: int | None          # unix seconds when the stop was recorded
+
+
+@dataclass
+class LatestTurn:
+    """Newest turn of one thread (max rowid = latest started turn).
+
+    A quota failure only owns a thread while it is still that thread's
+    newest turn: a later completed turn means the user continued the work
+    themselves, and an interrupted newest turn belongs to the Stop-button
+    / Continue path, never to prompt injection.
+
+    ``final_answer`` is read from the turn's ``final_agent_item_id`` item
+    (``phase == "final_answer"``). A completed turn always has one; failed
+    and interrupted turns have none. It distinguishes a turn that really
+    delivered an answer from one the app marked completed anyway.
+    """
+    thread_id: str
+    turn_id: str
+    status: str                      # completed | failed | interrupted | inProgress
+    started_at: int | None = None
+    completed_at: int | None = None
+    last_item_ms: int | None = None
+    codex_error_info: str = ""
+    message: str = ""
+    final_answer: bool = False
+
+    def as_failure(self) -> "TurnFailure":
+        return TurnFailure(
+            thread_id=self.thread_id, turn_id=self.turn_id,
+            completed_at=self.completed_at,
+            codex_error_info=self.codex_error_info, message=self.message)
 
 
 class CodexState:
@@ -179,13 +225,7 @@ class CodexState:
                 "AND (completed_at IS NULL OR completed_at > ?) "
                 "ORDER BY completed_at DESC LIMIT ?", (since_completed_at, limit))
             for thread_id, turn_id, status, error_json, completed_at in rows:
-                try:
-                    payload = json.loads(error_json)
-                except (ValueError, TypeError):
-                    payload = {"message": str(error_json)[:500]}
-                message = str(payload.get("message") or "")
-                info = str(payload.get("codexErrorInfo") or
-                           payload.get("codex_error_info") or "")
+                info, message = _error_fields(error_json)
                 out.append(TurnFailure(
                     thread_id=aliases.get(thread_id, thread_id),
                     turn_id=turn_id,
@@ -256,46 +296,83 @@ class CodexState:
             return None
         return ThreadInfo(*row)
 
+    def latest_turns(self) -> dict[str, "LatestTurn"]:
+        """One newest row per thread, keyed by canonical thread id.
+
+        Continuation ids in a rollout filename are folded onto the
+        canonical threads-table id; when two raw ids map to the same
+        conversation the later-started turn wins.
+        """
+        aliases = self.rollout_alias_map()
+        con = _connect_ro(self._history_db)
+        try:
+            rows = con.execute(
+                "SELECT t.thread_id, t.turn_id, t.status, t.started_at, "
+                "t.completed_at, t.error_json, "
+                "(SELECT MAX(i.created_at_ms) FROM thread_items i "
+                " WHERE i.thread_id = t.thread_id) AS last_item_ms, "
+                "(SELECT i.item_json FROM thread_items i "
+                " WHERE i.thread_id = t.thread_id "
+                " AND i.item_id = t.final_agent_item_id) AS final_json "
+                "FROM thread_turns t WHERE t.rowid IN "
+                "(SELECT MAX(rowid) FROM thread_turns GROUP BY thread_id)"
+            ).fetchall()
+        finally:
+            con.close()
+        out: dict[str, LatestTurn] = {}
+        for (thread_id, turn_id, status, started_at, completed_at,
+             error_json, last_item_ms, final_json) in rows:
+            info, message = _error_fields(error_json)
+            tid = aliases.get(thread_id.lower(), thread_id)
+            final_answer = False
+            if final_json:
+                try:
+                    payload = json.loads(final_json)
+                    final_answer = (isinstance(payload, dict)
+                                    and payload.get("phase") == "final_answer")
+                except (ValueError, TypeError):
+                    pass
+            cand = LatestTurn(
+                thread_id=tid, turn_id=turn_id, status=status,
+                started_at=started_at, completed_at=completed_at,
+                last_item_ms=last_item_ms, codex_error_info=info,
+                message=message, final_answer=final_answer)
+            prev = out.get(tid)
+            if prev is not None and (prev.started_at or 0,
+                                     prev.completed_at or 0) > (
+                    cand.started_at or 0, cand.completed_at or 0):
+                continue
+            out[tid] = cand
+        return out
+
+    def latest_turn(self, thread_id: str,
+                    turns: dict[str, "LatestTurn"] | None = None
+                    ) -> "LatestTurn" | None:
+        return (turns if turns is not None
+                else self.latest_turns()).get(thread_id)
+
     def stopped_turns(self, min_age_sec: float = 0) -> list[StoppedTurn]:
         """Threads whose newest turn is interrupted, newer than *min_age_sec*.
 
-        Only the latest row per thread counts (max rowid = latest started
+        Only the latest turn per thread counts (max rowid = latest started
         turn): a thread that was continued afterwards has a newer turn and
         must not be touched. Thread ids are canonicalized through
         :meth:`rollout_alias_map` so a continuation id never looks like a
         second stopped conversation.
         """
         import time as _time
-        aliases = self.rollout_alias_map()
-        con = _connect_ro(self._history_db)
-        try:
-            rows = con.execute(
-                "SELECT t.thread_id, t.turn_id, t.status, t.started_at, "
-                "t.completed_at, "
-                "(SELECT MAX(i.created_at_ms) FROM thread_items i "
-                " WHERE i.thread_id = t.thread_id) AS last_item_ms "
-                "FROM thread_turns t WHERE t.rowid IN "
-                "(SELECT MAX(rowid) FROM thread_turns GROUP BY thread_id)"
-            ).fetchall()
-        finally:
-            con.close()
         now = _time.time()
         out: list[StoppedTurn] = []
-        seen: set[str] = set()
-        for thread_id, turn_id, status, started_at, completed_at, last_item_ms in rows:
-            if status != "interrupted":
+        for tid, lt in self.latest_turns().items():
+            if lt.status != "interrupted":
                 continue
-            stopped = (completed_at
-                       or (last_item_ms / 1000 if last_item_ms else None)
-                       or started_at)
+            stopped = (lt.completed_at
+                       or (lt.last_item_ms / 1000 if lt.last_item_ms else None)
+                       or lt.started_at)
             if stopped is not None and now - stopped < min_age_sec:
                 continue
-            tid = aliases.get(thread_id.lower(), thread_id)
-            if tid in seen:
-                continue
-            seen.add(tid)
             out.append(StoppedTurn(
-                thread_id=tid, turn_id=turn_id,
+                thread_id=tid, turn_id=lt.turn_id,
                 stopped_at=int(stopped) if stopped is not None else None))
         return out
 

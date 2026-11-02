@@ -21,7 +21,7 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .state import load_state, save_state
+from .state import arm_thread, load_state, save_state
 from . import __version__
 
 PANEL_HTML = r"""<!doctype html>
@@ -248,7 +248,7 @@ border-radius:8px}
 text-transform:uppercase;letter-spacing:1px;margin:18px 2px 10px}
 .sect:after{content:"";flex:1;height:1px;
 background:linear-gradient(90deg,var(--line),transparent)}
-.tcard{background:var(--glass-soft);border:1px solid var(--glass-brd-soft);border-radius:16px;
+.tcard{position:relative;background:var(--glass-soft);border:1px solid var(--glass-brd-soft);border-radius:16px;
 padding:13px 16px;margin-bottom:10px;box-shadow:var(--glass-hi),var(--glass-shadow-sm);
 -webkit-backdrop-filter:blur(16px) saturate(150%);backdrop-filter:blur(16px) saturate(150%);
 transition:border-color .18s,box-shadow .24s,transform .24s}
@@ -266,6 +266,14 @@ animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
 .ttl{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;
 text-overflow:ellipsis;flex:1;min-width:0}
+.tbadges{display:flex;align-items:center;gap:9px;flex:none}
+.tbadges:empty{display:none}
+.tacts{display:flex;align-items:center;gap:2px;flex:none}
+/* narrow cards: badges drop under the title instead of squeezing it */
+@media (max-width:460px){
+.thead{flex-wrap:wrap;row-gap:7px}
+.tacts{order:1}
+.tbadges{order:2;flex:1 0 100%;margin-left:17px}}
 .badge{font-size:10px;border-radius:6px;padding:1.5px 7px;font-weight:600;flex:none}
 .badge.goal{background:rgba(var(--accent-rgb),.16);color:var(--accent);
 border:1px solid rgba(var(--accent-rgb),.28)}
@@ -273,6 +281,49 @@ border:1px solid rgba(var(--accent-rgb),.28)}
 border:1px solid rgba(var(--warn-rgb),.32)}
 .badge.run{background:rgba(var(--accent-rgb),.16);color:var(--accent);
 border:1px solid rgba(var(--accent-rgb),.28)}
+/* one lifecycle pill per guarded card: quiet while idle, amber while parked,
+   accent while moving, filled check when the goal is really done */
+.badge.ph{font-weight:600;white-space:nowrap}
+.badge.ph.dim{background:rgba(127,127,127,.11);color:var(--dim);
+border:1px solid rgba(127,127,127,.22)}
+.badge.ph.warn{background:var(--warnbg);color:var(--warn);
+border:1px solid rgba(var(--warn-rgb),.32)}
+.badge.ph.acc{background:rgba(var(--accent-rgb),.16);color:var(--accent);
+border:1px solid rgba(var(--accent-rgb),.28)}
+.badge.ph.done{background:rgba(var(--accent-rgb),.2);color:var(--accent);
+border:1px solid rgba(var(--accent-rgb),.5);font-weight:700}
+/* hover-only card actions live in the right gutter: no layout shift, no
+   permanent chrome; a pinned card keeps its pin lit */
+.iconbtn{position:relative;display:inline-flex;align-items:center;justify-content:center;
+width:18px;height:18px;padding:0;border:none;background:none;box-shadow:none;
+-webkit-backdrop-filter:none;backdrop-filter:none;color:var(--dim);border-radius:5px;
+opacity:0;flex:none;cursor:pointer;
+transition:opacity .15s ease,color .15s ease,background .15s ease}
+.iconbtn:hover{color:var(--fg);background:rgba(127,127,127,.13);
+border:none;box-shadow:none;transform:none}
+.iconbtn:active{transform:none}
+.iconbtn:focus-visible{opacity:1;outline:2px solid rgba(var(--accent-rgb),.65);
+outline-offset:1px}
+.iconbtn svg{width:13px;height:13px;display:block;pointer-events:none}
+.tcard:hover .iconbtn{opacity:.5}
+.tcard:hover .iconbtn:hover{opacity:1}
+.tcard .pinbtn.on{opacity:1;color:var(--accent)}
+.tcard .pinbtn.on svg{fill:currentColor;fill-opacity:.22}
+.tcard .grip{cursor:grab}
+.tcard .grip:active{cursor:grabbing}
+body.dragging .tcard:hover{transform:none;
+box-shadow:var(--glass-hi),var(--glass-shadow-sm)}
+body.dragging .tcard:hover .iconbtn{opacity:.5}
+.tcard.dragging{opacity:.38;border-style:dashed}
+.tcard.dragging:hover{transform:none}
+.tcard.dropbefore:before,.tcard.dropafter:after{content:"";position:absolute;
+left:14px;right:14px;height:2px;border-radius:2px;background:var(--accent);
+box-shadow:0 0 9px rgba(var(--accent-rgb),.55);pointer-events:none}
+.tcard.dropbefore:before{top:-6px}
+.tcard.dropafter:after{bottom:-6px}
+/* the only line between the pinned shelf and the rest of the list */
+.pinsplit{height:1px;margin:13px 5px 11px;
+background:linear-gradient(90deg,transparent,var(--line) 18%,var(--line) 82%,transparent)}
 .meta{font-size:11.5px;color:var(--dim);margin:5px 0 11px 17px}
 .meta em{font-style:normal;color:var(--dim)}
 .controls{display:flex;gap:11px;align-items:center;flex-wrap:wrap;
@@ -292,8 +343,8 @@ box-shadow:0 14px 34px var(--shadow),var(--glass-hi);opacity:0;pointer-events:no
 transition:opacity .16s ease;z-index:9999;text-align:left}
 .tip:hover:after,.tipn:hover:after{opacity:1}
 .ctl:has(.dd.open):after{display:none}
-.tipn{cursor:default}
-.tip.end:after{left:auto;right:-8px;transform:none}
+.tipn{position:relative;cursor:default}
+.tip.end:after,.tipn.end:after{left:auto;right:-8px;transform:none}
 .tip.start:after{left:-8px;transform:none}
 .sw{position:relative;width:40px;height:22px;display:inline-block;flex:none}
 .sw input{opacity:0;width:0;height:0}
@@ -431,7 +482,7 @@ button:hover,.tcard:hover{transform:none}}
 </div>
 </div>
 <div class="sect" data-i18n="recent">Recent conversations</div>
-<div id="threads"></div>
+<div id="threads" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropCard(event)" ondragend="dragEnd()"></div>
 <div class="foot" id="foot"></div>
 <div id="updOverlay" onclick="if(event.target===this)closeUpdate()">
  <div class="modal">
@@ -465,6 +516,21 @@ postAt:"动态发布时间",exhausted:"已耗尽",newsWin:"近 48 小时",clkLoc
 tipModel:"每次自动恢复时使用的模型/推理强度；选「继承」则沿用对话自身设置",
 tipModelGoal:"/goal 会话由桌面应用驱动，固定沿用对话自身设置，因此锁定为继承",g_usage_limited:"额度受限",g_budget_limited:"预算受限",g_active:"运行中",
 g_paused:"已暂停",g_blocked:"受阻",g_complete:"已完成",
+phWatching:"守护中",phQuota:"等待额度",phCapacity:"等待容量",phBudget:"等待预算",phRunning:"运行中",phDelivered:"已续跑",phStage:"阶段完成",phCompleted:"✓ 已完成",phPaused:"已暂停",phStopped:"已停止",phBlocked:"受阻",
+phTipWatching:"守护已开启，等待下一次中断；当前没有需要续跑的内容。",
+phTipQuota:"额度窗口已耗尽，重置后会自动继续。",
+phTipCapacity:"模型容量不足，守护会自动重试。",
+phTipBudget:"目标预算已耗尽，守护等待预算恢复。",
+phTipRunning:"正在自动续跑本轮任务。",
+phTipDelivered:"守护已自动续跑，本轮已结束，接下来交给你。守护仍然开启，可随时关闭。",
+phTipStage:"目标尚未完成，但本轮阶段已经结束；若再次中断，守护会继续。",
+phTipCompleted:"目标已完成。守护仍然开启——确定不再需要时请关闭。",
+phTipDoneOff:"目标已完成；守护已关闭。",
+phTipBlocked:"目标受阻（例如模型容量不足），守护会自动重试。",
+phTipPaused:"所有守护已暂停。",
+phTipGoalPaused:"目标已被应用暂停。",
+phTipStopped:"周额度关闭时守护自行停止；需要时重新开启。",
+pinTip:"置顶",unpinTip:"取消置顶",dragTip:"拖动排序",
 tipPrio:"优先级：0 最高。额度恢复后同优先级一起继续；低优先级会等更高优先级的任务完成后才继续",prioTop:"最高",
 goalOK:"✓ 已自动继续",uiaOK:"✓ 已点继续",contOK:"✓ 已继续",writerBusy:"会话被 Codex 应用占用，切走/关闭后自动接管",quotaWait:"等待额度",capacityWait:"等待模型容量",
 errConn:"无法连接守护进程：",errTimeout:"请求超时（8 秒无响应）",errFail:"连接失败",
@@ -472,7 +538,7 @@ errHint:"。面板每 15 秒自动重试；若持续失败，请确认守护进�
 upd:"已更新",restored:"已恢复默认指令",pauseOK:"守护已暂停",resumeOK:"守护已恢复",
 updTitle:"发现新版本",updTip:"可升级到 v",updNote:"守护进程会自动更新代码并重启；正在进行的对话和额度不受影响。面板会自动重新连接。",updCancel:"稍后",updGo:"更新并重启",updStarting:"正在准备升级…",updRestarting:"正在升级并重启守护进程，面板会自动重新连接…",updFailed:"升级未能启动：",updLastFail:"上次升级未完成：",updSlow:"升级耗时较长——请查看 update.log，或手动重启守护进程。",
 logoTip:"检查更新",updChecking:"正在检查更新…",updCurrent:"已是最新版本 v",updFound:"发现新版本 v",updCheckFail:"检查更新失败：",updCheckFailTip:"更新检查失败，点击重试",updOff:"更新检查已关闭",
-footer:"打开方式：侧栏输入 <code>http://127.0.0.1:8765</code>（推荐，不消耗额度）· 桌面快捷方式 · 完整说明见插件 README"},
+footer:"打开方式：侧栏输入 <code>http://127.0.0.1:8765</code>（推荐，不消耗额度）· 完整说明见插件 README"},
 en:{title:"Codex Guard",sub:"Auto-continue conversations after quota resets",
 langTip:"Language: English (click to switch)",loading:"Loading…",theme:"Theme",themeAuto:"Follow system",themeLight:"Light",themeDark:"Dark",w5:"5h window",wk:"Weekly",reset:"Resets",
 status:"Usage",limited:"Limited",avail:"✓ Available",unknown:"Unknown",
@@ -493,6 +559,21 @@ postAt:"post publication time",exhausted:"Exhausted",newsWin:"last 48h",clkLocal
 tipModel:"Model/reasoning used for every automatic resume; Inherit keeps the conversation's own settings",
 tipModelGoal:"/goal threads are driven by the desktop app and always use their own settings, so they stay locked",g_usage_limited:"quota-limited",g_budget_limited:"budget-limited",g_active:"active",
 g_paused:"paused",g_blocked:"blocked",g_complete:"complete",
+phWatching:"Watching",phQuota:"Waiting for quota",phCapacity:"Waiting for capacity",phBudget:"Waiting for budget",phRunning:"Running",phDelivered:"Resumed",phStage:"Stage done",phCompleted:"✓ Completed",phPaused:"Paused",phStopped:"Stopped",phBlocked:"Blocked",
+phTipWatching:"Guard is on. Waiting for the next interruption; nothing to resume right now.",
+phTipQuota:"Parked until the quota window resets; the guard continues automatically.",
+phTipCapacity:"The model is at capacity; the guard retries automatically.",
+phTipBudget:"The goal hit its budget; the guard waits for the budget to recover.",
+phTipRunning:"An automatic resume is running right now.",
+phTipDelivered:"The guard resumed this conversation and the turn finished — it's your move. Guard stays on; switch it off whenever you like.",
+phTipStage:"A stage finished but the goal is still active; the guard continues if it gets interrupted again.",
+phTipCompleted:"The goal is complete. Guard is still on — switch it off when you're done.",
+phTipDoneOff:"The goal is complete; guard is off.",
+phTipBlocked:"The goal is blocked (for example by model capacity); the guard keeps retrying.",
+phTipPaused:"All guardians are paused.",
+phTipGoalPaused:"The goal was paused by the app.",
+phTipStopped:"The guard turned itself off when the weekly window closed. Re-enable it to keep guarding.",
+pinTip:"Pin to top",unpinTip:"Unpin",dragTip:"Drag to reorder",
 tipPrio:"Priority: 0 is highest. Same priority resumes together; lower priorities wait until higher-priority tasks finish",prioTop:"highest",
 goalOK:"✓ auto-continued",uiaOK:"✓ Continue clicked",contOK:"✓ continued",writerBusy:"held by the Codex app; guard resumes once released",quotaWait:"waiting for quota",capacityWait:"waiting for model capacity",
 errConn:"Cannot reach guard daemon: ",errTimeout:"request timed out (8s)",
@@ -502,7 +583,7 @@ upd:"Saved",restored:"Prompt reset to default",pauseOK:"Paused all",
 resumeOK:"Resumed all",
 updTitle:"Update available",updTip:"Update available: v",updNote:"The guard will update its code and restart. Conversations and quota are unaffected; this panel reconnects automatically.",updCancel:"Later",updGo:"Update & restart",updStarting:"Preparing update…",updRestarting:"Updating and restarting the guard; this panel reconnects automatically…",updFailed:"Update could not start: ",updLastFail:"Last update did not finish: ",updSlow:"This is taking longer than usual — check update.log or restart the daemon manually.",
 logoTip:"Check for updates",updChecking:"Checking for updates…",updCurrent:"Up to date: v",updFound:"New version available: v",updCheckFail:"Update check failed: ",updCheckFailTip:"Update check failed — click to retry",updOff:"Update checks are disabled",
-footer:"Open: type <code>http://127.0.0.1:8765</code> in the sidebar (recommended, no quota cost) · desktop shortcut · full docs in the plugin README"}};
+footer:"Open: type <code>http://127.0.0.1:8765</code> in the sidebar (recommended, no quota cost) · full docs in the plugin README"}};
 function L(k){var d=I18N[LNG]||I18N.zh;var v=d[k];
 return (v===undefined)?(I18N.zh[k]||k):v}
 function p2(n){return (n<10?"0":"")+n}
@@ -844,9 +925,109 @@ function runUpdate(){
 }
 function threadsInteractive(){
 var b=document.getElementById("threads");if(!b)return false;
+if(window.__dragging)return true;
 if(b.querySelector(".dd.open"))return true;
 var a=document.activeElement;
 return !!(a&&b.contains(a)&&(a.tagName==="INPUT"||a.tagName==="TEXTAREA"))}
+/* goal completion, stage ends and ordinary-thread delivery are DIFFERENT
+   states; the pill is the one place the panel says which one it is */
+function phaseInfo(t){
+var p=t.phase||"";
+if(!p){
+ /* an unguarded goal still deserves the completion flip; it is goal
+    state, not guard state */
+ if(t.goal_status==="complete")return{label:L("phCompleted"),cls:"done",
+  tip:L("phTipDoneOff")};
+ return null}
+var r=t.phase_reason||"";
+if(p==="watching")return{label:L("phWatching"),cls:"dim",tip:L("phTipWatching")};
+if(p==="waiting"){
+ if(r==="capacity")return{label:L("phCapacity"),cls:"warn",tip:L("phTipCapacity")};
+ if(r==="budget")return{label:L("phBudget"),cls:"warn",tip:L("phTipBudget")};
+ if(r==="blocked")return{label:L("phBlocked"),cls:"warn",tip:L("phTipBlocked")};
+ return{label:L("phQuota"),cls:"warn",tip:L("phTipQuota")};
+}
+if(p==="running")return{label:L("phRunning"),cls:"acc",tip:L("phTipRunning")};
+if(p==="delivered")return{label:L("phDelivered"),cls:"acc",tip:L("phTipDelivered")};
+if(p==="stage")return{label:L("phStage"),cls:"acc",tip:L("phTipStage")};
+if(p==="completed")return{label:L("phCompleted"),cls:"done",tip:L("phTipCompleted")};
+if(p==="paused")return{label:L("phPaused"),cls:"dim",
+ tip:r==="goal"?L("phTipGoalPaused"):L("phTipPaused")};
+if(p==="stopped")return{label:L("phStopped"),cls:"dim",tip:L("phTipStopped")};
+return null}
+function threadById(id){
+var s=window.__s;if(!s||!s.threads)return null;
+for(var i=0;i<s.threads.length;i++)if(s.threads[i].id===id)return s.threads[i];
+return null}
+function togglePin(id){
+var t=threadById(id);if(!t)return;
+api("/api/threads/"+id,{ui_pin:!t.ui_pin}).then(function(r){
+if(r&&r.error){toast(r.error);return}
+refresh()}).catch(function(){toast(L("errFail"))})}
+var dragId=null;
+function dragStart(e){
+var grip=e.target.closest?e.target.closest(".grip"):null;if(!grip)return;
+var card=grip.closest(".tcard");if(!card)return;
+dragId=card.getAttribute("data-id");
+window.__dragging=true;document.body.classList.add("dragging");
+card.classList.add("dragging");
+try{e.dataTransfer.effectAllowed="move";
+e.dataTransfer.setData("text/plain",dragId);
+e.dataTransfer.setDragImage(card,26,22)}catch(x){}}
+function dragOver(e){
+if(!dragId)return;
+e.preventDefault();e.dataTransfer.dropEffect="move";
+var box=document.getElementById("threads");
+var cards=[].slice.call(box.querySelectorAll(".tcard[data-id]"));
+var others=cards.filter(function(c){return c.getAttribute("data-id")!==dragId});
+for(var i=0;i<others.length;i++)others[i].classList.remove("dropbefore","dropafter");
+if(!others.length)return;
+var idx=others.length;
+for(var j=0;j<others.length;j++){
+var r=others[j].getBoundingClientRect();
+if(e.clientY<r.top+r.height/2){idx=j;break}}
+if(idx<others.length)others[idx].classList.add("dropbefore");
+else others[others.length-1].classList.add("dropafter");
+window.__dropIdx=idx}
+function dragLeave(e){
+if(!dragId)return;
+var box=document.getElementById("threads");
+if(e.relatedTarget&&box.contains(e.relatedTarget))return;
+var d=box.querySelectorAll(".dropbefore,.dropafter");
+for(var i=0;i<d.length;i++)d[i].classList.remove("dropbefore","dropafter");
+window.__dropIdx=null}
+function dragEnd(){
+window.__dragging=false;dragId=null;window.__dropIdx=null;
+document.body.classList.remove("dragging");
+var box=document.getElementById("threads");if(!box)return;
+var d=box.querySelectorAll(".dragging,.dropbefore,.dropafter");
+for(var i=0;i<d.length;i++)d[i].classList.remove("dragging","dropbefore","dropafter")}
+function dropCard(e){
+if(!dragId)return;
+e.preventDefault();
+var box=document.getElementById("threads");
+var dragged=box.querySelector('.tcard[data-id="'+dragId+'"]');
+var cards=[].slice.call(box.querySelectorAll(".tcard[data-id]"));
+var others=cards.filter(function(c){return c!==dragged});
+var idx=window.__dropIdx;
+if(idx===undefined||idx===null)idx=others.length;
+/* crossing the divider changes the pin state; right ON the boundary the
+   card keeps the state it came with, so a small mis-drop never flips it */
+var pinnedCount=0;
+for(var i=0;i<others.length;i++)if(others[i].classList.contains("pinned"))pinnedCount++;
+var wasPin=!!(dragged&&dragged.classList.contains("pinned"));
+var newPin=(idx<pinnedCount)?true:(idx>pinnedCount?false:wasPin);
+var ids=others.map(function(c){return c.getAttribute("data-id")});
+ids.splice(idx,0,dragId);
+var pmap={};
+others.forEach(function(c){pmap[c.getAttribute("data-id")]=
+c.classList.contains("pinned")});
+pmap[dragId]=newPin;
+var pinned=ids.filter(function(id){return pmap[id]});
+dragEnd();
+api("/api/threads/reorder",{order:ids,pinned:pinned}).then(function(r){
+if(r&&r.error){toast(r.error);return}
+refresh()}).catch(function(){toast(L("errFail"));refresh()})}
 function refresh(){
 return api("/api/status").then(function(s){
 window.__s=s;
@@ -889,12 +1070,32 @@ s.dry_run?'<span class="chip dry">DRY-RUN</span>':"";
 var defp=s.default_prompt||"";
 var rows="";
 var ts=s.threads||[];
+var hadPin=ts.some(function(x){return x.ui_pin});
+var splitDone=false;
 for(var i=0;i<ts.length;i++){
 var t=ts[i];
+if(hadPin&&!splitDone&&!t.ui_pin){
+rows+='<div class="pinsplit"></div>';splitDone=true}
+var pinfo=phaseInfo(t);
 var badges=(t.is_goal?'<span class="badge goal">GOAL</span>':"")+
-(t.goal_status?'<span class="badge gstat">'+esc(gstat(t.goal_status))+"</span>":"")+
+(pinfo?'<span class="badge ph '+pinfo.cls+' tipn" data-tip="'+esc(pinfo.tip)+'">'+
+esc(pinfo.label)+"</span>":
+(t.goal_status?'<span class="badge gstat">'+esc(gstat(t.goal_status))+"</span>":
 (!t.is_goal&&t.run?'<span class="badge '+(t.run==="running"?"run":"gstat")+'">'+
-esc(t.run==="running"?L("stRunning"):L("stWaiting"))+"</span>":"");
+esc(t.run==="running"?L("stRunning"):L("stWaiting"))+"</span>":"")));
+var gripBtn='<span class="iconbtn grip tipn end" draggable="true" aria-hidden="true" data-tip="'+
+esc(L("dragTip"))+'"><svg viewBox="0 0 10 16"><g fill="currentColor">'+
+'<circle cx="3" cy="3.2" r="1.25"/><circle cx="3" cy="8" r="1.25"/>'+
+'<circle cx="3" cy="12.8" r="1.25"/><circle cx="7" cy="3.2" r="1.25"/>'+
+'<circle cx="7" cy="8" r="1.25"/><circle cx="7" cy="12.8" r="1.25"/>'+
+"</g></svg></span>";
+var pinBtn='<button type="button" class="iconbtn pinbtn'+(t.ui_pin?" on":"")+
+' tipn end" data-tip="'+esc(t.ui_pin?L("unpinTip"):L("pinTip"))+
+'" aria-label="'+esc(t.ui_pin?L("unpinTip"):L("pinTip"))+
+'" onclick="togglePin(\''+jsq(t.id)+'\')"><svg viewBox="0 0 24 24" fill="none" '+
+'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+
+'<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>'+
+"</svg></button>";
 var tries=(t.attempts&&t.attempts>t.resumes)?(L("tryPfx")+t.attempts+L("trySfx")):"";
 var oc=t.last_outcome;
 var ocMap={"goal_continue":"goalOK","uia_continue":"uiaOK","continued":"contOK","writer_busy":"writerBusy","usage_limit":"quotaWait","capacity_wait":"capacityWait","server_overloaded":"capacityWait","overloaded":"capacityWait"};
@@ -950,9 +1151,11 @@ for(var q=0;q<=pMax;q++){prioCtl+='<div class="ddopt'+(q===pv?" sel":"")+
 "</div>"}
 prioCtl+="</div></div>";
 rows+=
-'<div class="tcard '+(t.guard?"guard":"")+'" id="tc_'+esc(t.id)+'">'+
+'<div class="tcard '+(t.guard?"guard":"")+(t.ui_pin?" pinned":"")+'" id="tc_'+
+esc(t.id)+'" data-id="'+esc(t.id)+'">'+
 '<div class="thead"><span class="dot"></span><span class="ttl">'+
-esc((t.title||"")||String(t.id||"").slice(0,13))+"</span>"+badges+"</div>"+
+esc((t.title||"")||String(t.id||"").slice(0,13))+'</span><span class="tbadges">'+badges+
+'</span><span class="tacts">'+gripBtn+pinBtn+"</span></div>"+
 '<div class="meta">'+L("lastUpd")+" "+fmtMS(t.updated_ms)+" · "+L("resumed")+" <em>"+fmt(t.resumes)+
 "</em>"+L("times")+tries+
 
@@ -1171,6 +1374,9 @@ class ControlApi:
                         return
                     self._json(api.reset_stats())
                     return
+                if self.path == "/api/threads/reorder":
+                    self._json(api.reorder(payload))
+                    return
                 if self.path.startswith("/api/threads/"):
                     tid = self.path[len("/api/threads/"):].strip("/")
                     self._json(api.set_thread(tid, payload))
@@ -1232,8 +1438,25 @@ class ControlApi:
                 "last_outcome": t.last_outcome if t else "",
                 "next_wake": (t.next_wake_iso[:19] if t and t.next_wake_iso
                               else None),
+                "phase": t.phase if t else "",
+                "phase_reason": t.phase_reason if t else "",
+                "phase_at": t.phase_at if t else None,
+                "ui_pin": bool(t and t.ui_pin),
+                "ui_order": t.ui_order if t else None,
                 "updated_ms": info.updated_at_ms,
             })
+        # pinned conversations first, then manual rank. Threads the user
+        # never placed (no ui_order) float above the manual order by
+        # recency, so a fresh conversation never disappears below an old
+        # arrangement.
+        def _ui_key(item):
+            th = st.threads.get(item["id"])
+            order = th.ui_order if th is not None else None
+            return (0 if (th is not None and th.ui_pin) else 1,
+                    0 if order is None else 1,
+                    order if order is not None else 0,
+                    -int(item.get("updated_ms") or 0))
+        out_threads.sort(key=_ui_key)
         # show what the planner acts on: first-hand interruption evidence
         # overrides a snapshot that still trails at 99% after the account
         # already refused a turn
@@ -1326,6 +1549,7 @@ class ControlApi:
             # bloat every status poll
             ann = {k: v for k, v in ann.items() if k != "posts"}
         return {
+            "version": __version__,
             "paused": bool(st and st.paused),
             "dry_run": bool(d.cfg["general"]["dry_run"]),
             "quota": quota,
@@ -1387,10 +1611,18 @@ class ControlApi:
         st = self.daemon.state
         t = st.thread(thread_id)
         if "guard" in payload:
-            t.manual = bool(payload["guard"])
-            t.tracked = bool(payload["guard"])
-            if payload["guard"] and not t.last_kind:
-                t.last_kind = "usage_primary"
+            if payload["guard"]:
+                arm_thread(t)
+            else:
+                t.manual = False
+                t.tracked = False
+                t.phase = ""
+                t.phase_reason = ""
+                t.phase_at = None
+                t.phase_turn_id = None
+                t.resume_floor_turn_id = None
+                t.resume_floor_open = False
+                t.delivered_turn_id = None
         if "weekly" in payload:
             t.guard_weekly = bool(payload["weekly"])
         if "model" in payload:
@@ -1407,12 +1639,38 @@ class ControlApi:
             except (TypeError, ValueError):
                 prio = 0
             t.priority = max(0, prio)
+        if "ui_pin" in payload:
+            t.ui_pin = bool(payload["ui_pin"])
         save_state(st)
         self.daemon._state_mtime = os.path.getmtime(st.state_path)
         return {"thread": thread_id, "guard": t.manual,
                 "weekly": t.guard_weekly, "model": t.guard_model,
                 "effort": t.guard_effort, "prompt": t.guard_prompt,
-                "reset_card": t.guard_reset_card, "priority": t.priority}
+                "reset_card": t.guard_reset_card, "priority": t.priority,
+                "ui_pin": t.ui_pin}
+
+    def reorder(self, payload: dict) -> dict:
+        """Persist the panel's visual order and pinned set.
+
+        The client sends the full visible order, so a drop across the pin
+        separator can change both rank and group in one atomic write.
+        """
+        st = self.daemon.state
+        order = payload.get("order")
+        if (not isinstance(order, list)
+                or not all(isinstance(x, str) and x for x in order)):
+            return {"error": "order must be a list of thread ids"}
+        pinned = payload.get("pinned")
+        pinned_set = (set(x for x in pinned if isinstance(x, str))
+                      if isinstance(pinned, list) else set())
+        for idx, thread_id in enumerate(order):
+            t = st.thread(thread_id)
+            t.ui_order = idx * 10
+            t.ui_pin = thread_id in pinned_set
+        save_state(st)
+        self.daemon._state_mtime = os.path.getmtime(st.state_path)
+        return {"ordered": len(order),
+                "pinned": len([x for x in order if x in pinned_set])}
 
 
 def _fmt_ms(ms: int | None) -> str | None:

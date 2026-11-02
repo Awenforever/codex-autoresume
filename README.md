@@ -56,7 +56,35 @@ Codex Guard does that for you, and it does it the way you would:
 - **Stopped turns pick themselves back up.** Stopped a reply halfway and
   Codex switched Send to **Continue**? Guard notices the interrupted turn
   and continues it through the same RPC the button uses — never by sending
-  a prompt into your conversation.
+  a prompt into your conversation. A stop older than
+  `stopped_continue_max_age_hours` counts as a finished conversation and is
+  left alone.
+- **A resume prompt with real exits.** The built-in nudge tells the model to
+  re-verify the actual state on disk (files, `git status`, last output)
+  instead of trusting the transcript; no recap, no redoing finished work; a
+  goal counts as complete only after its acceptance check actually runs; and
+  it stops to report when the task is already done, cannot pass, or the next
+  step is destructive or needs a human. Automated nudges get work, not
+  conversation. Per-thread overrides still work.
+- **Lifecycle states read from facts, not prose.** Each guarded card carries
+  one quiet pill — Watching, Running, Waiting (quota / capacity / budget),
+  Blocked, Stage done, Resumed, ✓ Completed, Paused, Stopped. ✓ Completed is
+  authoritative: it flips only when the goal's own database status becomes
+  `complete`, never because the model said "done". An ordinary conversation
+  shows **Resumed** instead (the guard delivered the turn; the next move is
+  yours) — only a `/goal` can truly complete. The completion flip is logged
+  and guarded by the reminder notification; the guard stays on so you can
+  decide whether to keep it or switch it off.
+- **Pin and reorder without permanent chrome.** Hover a card header for a pin
+  and a drag grip. Pinned conversations rise above a hairline divider; drag
+  a card across it to pin or unpin in one gesture. Order and pins persist
+  across restarts, and the controls stay invisible until hover.
+- **Armed after the fact still works.** Enabled the guard after the
+  interruption already happened? It adopts the conversation's newest failed
+  turn (kind, reset time, original message) on the next heartbeat — never a
+  guessed window. And only the newest turn counts: once you have finished
+  or continued the conversation yourself, the stale quota evidence is
+  dropped instead of prompting into it.
 - **Priorities, like network metrics.** Give each conversation a priority
   (0 = highest, the default). Equal priorities resume together; a lower
   one waits until the running higher-priority work has finished.
@@ -99,7 +127,12 @@ codex-autoresume install                         # 4. background daemon
 
 Step 4 needs no administrator: when the logon scheduled task is denied, the
 installer falls back to a per-user Startup-folder shortcut and starts the
-daemon immediately.
+daemon immediately. The plugin alone does not start the panel — step 4 is
+what registers and starts the daemon. On Windows the installer also clears
+the logon task's default 72-hour execution cap; without that, Task Scheduler
+silently stops the daemon on day three and the panel starts refusing
+connections. `codex-autoresume doctor` reports the cap and whether the panel
+is reachable.
 
 Then open **http://127.0.0.1:8765** in the Codex sidebar browser (or any
 local browser) and flip **Auto-resume** on the conversations you want
@@ -178,6 +211,51 @@ verify    goal status must actually flip; counters and state persist
 Guarding is **opt-in** (per conversation, from the panel). Detection is
 read-only. The daemon runs as the current user, no administrator needed.
 
+### 🔁 Guard states / 守护状态
+
+| Pill | What it means | Guard |
+|---|---|---|
+| Watching | Armed; no interruption to handle right now. | on |
+| Running | An automatic resume is running. | on |
+| Waiting for quota | Parked by the 5h/weekly limit; continues after the window resets. | on |
+| Waiting for capacity / budget, Blocked | Model at capacity, goal budget exhausted, or the goal is blocked; retries with backoff. | on |
+| Stage done | A turn completed while the goal is still active — a stage, not the finish. | on |
+| Resumed | The guard resumed an ordinary conversation and the turn finished; your move. | on |
+| ✓ Completed | The goal's own status really became `complete`. | on until you switch it off |
+| Paused / Stopped | Paused by you (or the app), or the guard turned itself off at a weekly limit. | paused / off |
+
+The three cases that are easy to confuse are decided from machine facts:
+
+- **Interrupted** — newest turn `failed`/`interrupted` with limit evidence →
+  Waiting (quota / capacity / budget / blocked).
+- **Stage boundary** — the goal is still active but the current turn
+  completed → Stage done.
+- **Truly finished** — the goal database says `complete` → ✓ Completed.
+- **Delivered** — an ordinary (non-goal) conversation was resumed by the guard
+  and produced a final answer → Resumed. A turn boundary in a normal
+  conversation never means "the task is done"; only you can decide that.
+
+A completed guard deliberately stays on: the flip is visible, and the switch
+is yours. Re-arming, a new turn, or turning the guard off resets the state.
+
+### ✍️ Default resume prompt
+
+Ordinary conversations are nudged with three possible exits — continue,
+already done, needs a human — and one hard rule against guessing:
+
+```text
+Resume the interrupted task where it stopped. Verify the actual state first
+(files, git status, last output) instead of trusting the transcript; no recap,
+no redoing finished work. If it is already done, say so and stop. If the next
+step is destructive or needs a human decision, ask first. Automated message -
+act, don't reply conversationally.
+```
+
+Goal threads get the same prompt plus: the goal is complete only when its
+acceptance check actually passes (run it, don't assume it), and if it cannot
+pass, report the failing check and stop. Both prompts can be overridden
+globally (`[resume] prompt_generic` / `prompt_goal`) or per thread.
+
 ### 🤖 For AI agents / 面向 AI Agent
 
 If you are an agent setting this up for a user, the whole job is four
@@ -204,6 +282,7 @@ Optional `~/.codex-autoresume/config.toml` (copy
 poll_interval_sec = 50      # daemon heartbeat
 weekly_resume = "off"       # off | per-thread | all
 stopped_continue_sec = 60   # quiet seconds before a stopped turn continues
+stopped_continue_max_age_hours = 24  # older stops are finished work (0 = no cap)
 
 [resume]
 mode = "exec"               # "queue" delivers into the desktop app instead
@@ -236,6 +315,15 @@ enabled = true              # red-dot self-update in the panel
 
 - **Panel shows `--`** — that quota/ETA is not currently measurable; it
   fills in as the daemon samples. No invented numbers, by design.
+- **Panel refuses connections** — the daemon is not running. Run
+  `codex-autoresume doctor`; if the command is missing, only the plugin is
+  installed (run `pip install .` in the repo, then `codex-autoresume
+  install`). A stopped Windows logon task can be started with `schtasks /Run
+  /TN codex-autoresume`.
+- **Panel dies after about three days** — older Windows installs left the
+  logon task's default 72-hour execution cap in place, so Task Scheduler
+  killed the daemon. Upgrade to 0.3.63+ (the daemon clears the cap at
+  startup) or re-run `codex-autoresume install`; `doctor` shows the cap.
 - **MCP tools missing in the app** — reinstall the plugin
   (`codex plugin add …`); the MCP server is spawned via the
   `codex-autoresume-mcp` console script, so it must be on PATH (re-run
@@ -265,7 +353,11 @@ ChatGPT 的额度限制（5 小时窗口 / 周额度）打断 Codex 任务时，
 - **真正的无人值守。** 自动检测中断、等待额度窗口、恢复任务——普通对话和 `/goal` 都支持；守护重启不丢状态，每次恢复都会验证结果。
 - **goal 用官方方式继续。** 桌面应用占用会话时，通过 UI 自动化点击应用自己的 **Resume goal** 按钮（等价于你亲手点）；未占用时走官方 `thread/goal/set` 接口。**绝不**注入伪造的聊天消息。
 - **每次恢复可指定模型与推理强度。** 每个会话可固定自动恢复时的 model / reasoning，也可继承线程设置。
-- **被你中途停掉的回复会自动接上。** 回复中途点了停止、按钮翻成「继续」？守护能识别被打断的回合，并用与应用「继续」按钮相同的 RPC 继续任务——绝不像发消息那样往对话里注入 prompt。
+- **被你中途停掉的回复会自动接上。** 回复中途点了停止、按钮翻成「继续」？守护能识别被打断的回合，并用与应用「继续」按钮相同的 RPC 继续任务——绝不像发消息那样往对话里注入 prompt。超过 `stopped_continue_max_age_hours` 的停止视为已完成的工作，不再处理。
+- **带真实出口的继续指令。** 内置指令要求模型先核验磁盘上的真实状态（文件、`git status`、最后一次输出），不信任聊天记录；不复述、不重做已完成的工作；goal 只有验收检查真的跑过并通过才算完成；任务已完成、验收无法通过、或下一步涉及破坏性操作/需要人决定时，停下来报告。自动唤醒得到的是工作，不是闲聊。逐会话自定义指令仍然有效。
+- **状态来自事实，不来自模型措辞。** 每张守护卡片只带一个安静的状态胶囊：守护中、运行中、等待（额度/容量/预算）、受阻、阶段完成、已续跑、✓ 已完成、已暂停、已停止。✓ 已完成是权威状态：只有 goal 在数据库里的状态真的变成 `complete` 才会翻转，绝不因为模型在回复里说「完成了」。普通对话只显示 **已续跑**（守护送达了一轮，接下来交给你）——只有 `/goal` 才存在真正的「完成」。翻转会写入历史并触发提醒通知；守护保持开启，由你决定继续还是关闭。
+- **置顶与排序，不常驻任何多余控件。** 悬停卡片标题栏会出现图钉和拖动手柄。置顶的对话升到一条细分隔线之上；把卡片拖过分隔线即可一次完成置顶或取消置顶。顺序与置顶在守护重启后保留，图标只在悬停时出现。
+- **中断后再开启守护也有效。** 守护启用前就已经因额度中断？下一个心跳会读取会话最新的失败回合（类型、重置时间、原始消息）作为依据，不靠猜。而且只认最新回合：一旦你已自行继续或结束对话，旧额度证据会被丢弃，不会往对话里注入 prompt。
 - **优先级，像 Windows 网络跃迁。** 每个会话可设优先级（0 最高，也是默认）：同优先级同时恢复，低优先级要等高优先级的任务跑完才继续。
 - **周额度守护 + 重置卡。** 可选择让 goal 跨越周重置继续跑；周额度耗尽且账户有官方重置卡时可自动消耗（按会话开启）。
 - **值得打开的控制面板。** 深色 / 浅色双主题（跟随系统、记忆选择）、中英双语、双模拟时钟（本机 + 太平洋时间）、压力渐变的额度环、官方重置预告 / 实测到账 / 多源 Tibo 动态日志（重置追踪站 + 两个 X 镜像，每 2 分钟刷新）——挂在 `127.0.0.1:8765`，不消耗额度。
@@ -285,7 +377,7 @@ codex plugin add codex-autoresume-guard@codex-autoresume   # 3. 安装插件
 codex-autoresume install                         # 4. 后台守护
 ```
 
-第 4 步**不需要管理员**：登录计划任务被拒时自动回退为当前用户「启动」文件夹快捷方式，并立即启动守护。
+第 4 步**不需要管理员**：登录计划任务被拒时自动回退为当前用户「启动」文件夹快捷方式，并立即启动守护。**只装插件不会启动面板**——第 4 步才注册并启动守护。Windows 上安装器还会清除登录任务默认的 **72 小时执行上限**；不清除的话，任务计划程序会在第 3 天静默终止守护，面板随后拒绝连接。`codex-autoresume doctor` 会报告该上限以及面板是否可达。
 
 然后在 Codex 侧栏浏览器打开 **http://127.0.0.1:8765**，给想守护的会话打开 **守护** 开关即可——守护按会话手动开启。
 
@@ -348,6 +440,42 @@ codex  ──▶  "You've hit your usage limit … try again at 1:51 PM."
 
 守护**按会话手动开启**（面板或 `codex-autoresume watch <uuid|goal>`）；检测只读；守护以当前用户运行，无需管理员。
 
+### 🔁 守护状态
+
+| 胶囊 | 含义 | 守护 |
+|---|---|---|
+| 守护中 | 已武装；当前没有需要恢复的中断。 | 开 |
+| 运行中 | 正在自动恢复。 | 开 |
+| 等待额度 | 被 5h / 周额度停下，窗口重置后自动继续。 | 开 |
+| 等待容量 / 预算、受阻 | 模型容量不足、goal 预算耗尽或 goal 受阻；退避重试。 | 开 |
+| 阶段完成 | goal 仍有效，但当前回合已结束——只是一个小阶段，不是终点。 | 开 |
+| 已续跑 | 守护恢复了普通对话并送达终答；接下来交给你。 | 开 |
+| ✓ 已完成 | goal 自身状态真的变成了 `complete`。 | 开，直到你关闭 |
+| 已暂停 / 已停止 | 被你（或应用）暂停；或周额度关闭时守护自行停止。 | 暂停 / 关 |
+
+最容易混淆的三种情况，全部由机器事实判定：
+
+- **中断** —— 最新回合为 `failed`/`interrupted` 且有额度证据 → 等待（额度 / 容量 / 预算 / 受阻）。
+- **阶段结束** —— goal 仍为 active，但当前回合已完成 → 阶段完成。
+- **真正结束** —— goal 数据库状态为 `complete` → ✓ 已完成。
+- **已送达** —— 普通（非 goal）对话被守护恢复并产生了终答 → 已续跑。普通对话的回合边界永远不等于「任务完成」，那只能由你判断。
+
+完成后的守护会刻意保持开启：状态翻转清晰可见，开关交给你。重新武装、出现新回合或手动关闭守护都会重置状态。
+
+### ✍️ 默认继续指令
+
+普通对话会收到一条带三个出口的指令——继续、已完成、需要人——并禁止猜测：
+
+```text
+Resume the interrupted task where it stopped. Verify the actual state first
+(files, git status, last output) instead of trusting the transcript; no recap,
+no redoing finished work. If it is already done, say so and stop. If the next
+step is destructive or needs a human decision, ask first. Automated message -
+act, don't reply conversationally.
+```
+
+goal 对话使用同一指令，并追加：只有验收检查真的跑通才算完成（要运行，不能假设）；无法通过则报告失败的检查并停止。两条指令都可在全局（`[resume] prompt_generic` / `prompt_goal`）或逐会话覆盖。
+
 ### 🧩 配置
 
 可选的 `~/.codex-autoresume/config.toml`（从
@@ -357,6 +485,8 @@ codex  ──▶  "You've hit your usage limit … try again at 1:51 PM."
 [general]
 poll_interval_sec = 50      # 守护心跳
 weekly_resume = "off"       # off | per-thread | all
+stopped_continue_sec = 60   # 「停止」后静默多久再自动继续
+stopped_continue_max_age_hours = 24  # 更早的停止视为已完成（0 = 不限制）
 
 [resume]
 mode = "exec"               # "queue" 表示投递进桌面应用
@@ -388,6 +518,8 @@ enabled = true              # 面板红点自更新
 ### 🩺 常见问题
 
 - **面板显示 `--`** —— 该项当前不可测（如刚重启、样本不足）；采样够了自动出现。刻意不编数字。
+- **面板拒绝连接** —— 守护进程没在运行。先跑 `codex-autoresume doctor`；若命令不存在，说明只装了插件（在仓库里 `pip install .`，再 `codex-autoresume install`）。Windows 登录任务只是停了的话，可 `schtasks /Run /TN codex-autoresume`。
+- **面板约 3 天后打不开** —— 旧版 Windows 安装留下了登录任务默认的 72 小时执行上限，任务计划程序把守护杀掉了。升级到 0.3.63+（启动时自动清除）或重跑 `codex-autoresume install`；`doctor` 会显示该上限。
 - **应用里 MCP 工具缺失** —— 重装插件（`codex plugin add …`）；MCP 通过 `codex-autoresume-mcp` 命令拉起，须在 PATH 上（用同一个 Python 重跑 `pip install .`）。
 - **Codex 自动更新后** —— schema 可能漂移；跑 `codex-autoresume doctor`，异常请提 issue。
 - **8765 端口被占** —— 改配置里的 `[control_api] port`。
