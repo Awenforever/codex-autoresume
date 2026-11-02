@@ -887,6 +887,17 @@ class PanelDragTest(unittest.TestCase):
         self.assertIn(".tcard.drag-card{position:fixed!important", PANEL_HTML)
         self.assertIn('ph.className="dragph"', js)
         self.assertIn("function dragTick(", js)
+        # tall cards swap on a half-slot of travel: the leading edge in the
+        # direction of travel is compared with the sibling centre
+        update = _fn(js, "updateDragTarget")
+        self.assertIn("var refY=st.dir>0?bottom:(st.dir<0?top:cy);", update)
+        self.assertIn("var frac=st.dir>0?0.4:(st.dir<0?0.6:0.5);", update)
+        self.assertIn("refY<r.top+r.height*frac", update)
+        self.assertIn("if(!anchor&&newPin&&split)anchor=split;", update)
+        self.assertNotIn("split.nextElementSibling}", update)
+        self.assertIn("dir:0", js)
+        self.assertIn("st.dir=1", _fn(js, "onGripMove"))
+        self.assertIn("st.dir=1", _fn(js, "onGripUp"))
 
     def test_siblings_shift_live_and_card_settles_without_rebuild(self):
         from codex_autoresume.control import PANEL_HTML
@@ -923,16 +934,55 @@ class PanelDragTest(unittest.TestCase):
         if not shutil.which("node"):
             self.skipTest("node not installed")
         js = _panel_js()
-        harness = _fn(js, "orderedThreads") + r"""
+        harness = "var ORDER_HOLD=3600;\n" + "\n".join([
+            _fn(js, "uiRecent"), _fn(js, "groupOrder"),
+            _fn(js, "orderedThreads")]) + r"""
+var NOW=Date.now()/1000;
 var window={__s:{threads:[
- {id:"a",ui_pin:true,ui_order:20,updated_ms:5},
+ {id:"a",ui_pin:true,ui_order:20,updated_ms:5,ui_order_at:NOW-10},
  {id:"b",ui_pin:true,ui_order:10,updated_ms:1},
  {id:"c",ui_pin:true,ui_order:null,updated_ms:9},
  {id:"d",ui_pin:false,ui_order:null,updated_ms:30},
  {id:"e",ui_pin:false,ui_order:null,updated_ms:20},
- {id:"f",ui_pin:false,ui_order:5,updated_ms:2}
+ {id:"f",ui_pin:false,ui_order:5,updated_ms:2},
+ {id:"g",ui_pin:false,ui_order:15,updated_ms:100,ui_order_at:NOW-10},
+ {id:"h",ui_pin:false,ui_order:25,updated_ms:50}
 ]}};
 console.log(JSON.stringify(orderedThreads().map(function(t){return t.id})));
 """
         got = _run_node(harness)
-        self.assertEqual(got, ["b", "a", "c", "f", "d", "e"])
+        # c is never placed -> top of pinned; a is held at its rank despite
+        # recency; g is held so h (more recent) cannot pass it
+        self.assertEqual(got, ["c", "b", "a", "d", "e", "h", "g", "f"])
+
+    def test_expired_hold_rejoins_recency(self):
+        if not shutil.which("node"):
+            self.skipTest("node not installed")
+        js = _panel_js()
+        harness = "var ORDER_HOLD=3600;\n" + "\n".join([
+            _fn(js, "uiRecent"), _fn(js, "groupOrder"),
+            _fn(js, "orderedThreads")]) + r"""
+var NOW=Date.now()/1000;
+var window={__s:{threads:[
+ {id:"a",ui_pin:true,ui_order:20,updated_ms:5,ui_order_at:NOW-4000},
+ {id:"b",ui_pin:true,ui_order:10,updated_ms:1},
+ {id:"c",ui_pin:true,ui_order:null,updated_ms:9},
+ {id:"d",ui_pin:false,ui_order:null,updated_ms:30},
+ {id:"e",ui_pin:false,ui_order:null,updated_ms:20},
+ {id:"f",ui_pin:false,ui_order:5,updated_ms:2},
+ {id:"g",ui_pin:false,ui_order:15,updated_ms:100,ui_order_at:NOW-4000},
+ {id:"h",ui_pin:false,ui_order:25,updated_ms:50}
+]}};
+console.log(JSON.stringify(orderedThreads().map(function(t){return t.id})));
+"""
+        got = _run_node(harness)
+        self.assertEqual(got, ["c", "a", "b", "d", "e", "g", "h", "f"])
+
+    def test_reorder_sends_the_moved_card_for_the_hold(self):
+        from codex_autoresume.control import PANEL_HTML
+        drop = _fn(_panel_js(), "dropDrag")
+        self.assertIn("moved:[st.id]", drop)
+        self.assertIn("ui_order_at=Date.now()/1000", drop)
+        pin = _fn(_panel_js(), "togglePin")
+        self.assertIn("moved:[id]", pin)
+        self.assertIn("ui_order_at=Date.now()/1000", pin)

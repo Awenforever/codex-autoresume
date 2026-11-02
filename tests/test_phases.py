@@ -22,7 +22,7 @@ from datetime import datetime
 from codex_autoresume.codexenv import CodexState
 from codex_autoresume.config import (
     DEFAULTS, DEFAULT_PROMPT_GENERIC, DEFAULT_PROMPT_GOAL)
-from codex_autoresume.control import ControlApi
+from codex_autoresume.control import ControlApi, ORDER_HOLD_SECONDS
 from codex_autoresume.daemon import Daemon
 from codex_autoresume.state import WatcherState, load_state
 from tests.test_detect import build_codex_home, err_payload
@@ -375,6 +375,43 @@ class TestPinAndReorder(unittest.TestCase):
         self.assertEqual(st.threads["c"].ui_order, 20)
         self.assertTrue(st.threads["b"].ui_pin)
         self.assertFalse(st.threads["a"].ui_pin)
+        # no ``moved`` list: the whole arrangement is treated as deliberate
+        self.assertIsNotNone(st.threads["a"].ui_order_at)
+        self.assertIsNotNone(st.threads["c"].ui_order_at)
+
+    def test_reorder_marks_only_the_moved_card(self):
+        api = self._api()
+        api.reorder({"order": ["a", "b", "c"], "pinned": [], "moved": ["b"]})
+        st = load_state(api.daemon.state.state_path)
+        self.assertIsNone(st.threads["a"].ui_order_at)
+        self.assertIsNotNone(st.threads["b"].ui_order_at)
+        self.assertIsNone(st.threads["c"].ui_order_at)
+
+    def _pinned_status(self, held_at):
+        root = tempfile.mkdtemp(prefix="cxr-ph-")
+        home = build_codex_home(root, turns=[], threads=[
+            _thread_row("p1", 1000), _thread_row("p2", 2000),
+            _thread_row("p3", 3000)])
+        api = self._api(home)
+        d = api.daemon
+        d.cached_announcement = lambda: None
+        d.cached_models = lambda: []
+        d.cached_update = lambda: {}
+        st = d.state
+        for tid, order in (("p1", 0), ("p2", 10), ("p3", 20)):
+            t = st.thread(tid)
+            t.ui_pin = True
+            t.ui_order = order
+        st.thread("p1").ui_order_at = held_at
+        return [x["id"] for x in api.status()["threads"]]
+
+    def test_hold_keeps_slot_while_peers_follow_recency(self):
+        order = self._pinned_status(time.time())
+        self.assertEqual(order, ["p1", "p3", "p2"])
+
+    def test_expired_hold_rejoins_recency(self):
+        order = self._pinned_status(time.time() - ORDER_HOLD_SECONDS - 5)
+        self.assertEqual(order, ["p3", "p2", "p1"])
 
     def test_reorder_rejects_garbage(self):
         api = self._api()

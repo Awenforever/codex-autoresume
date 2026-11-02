@@ -79,9 +79,12 @@ class ThreadState:
     resume_floor_turn_id: str | None = None
     resume_floor_open: bool = False
     delivered_turn_id: str | None = None
-    # panel ordering: pinned cards first, then manual rank (None = recency)
+    # panel ordering: pinned cards first. ui_order is the last visual rank;
+    # ui_order_at marks a manual move and freezes this card's slot for
+    # ORDER_HOLD_SECONDS, after which the group follows recency again.
     ui_pin: bool = False
     ui_order: int | None = None
+    ui_order_at: float | None = None
     history: list[dict[str, Any]] = field(default_factory=list)
 
     def append_history(self, entry: dict[str, Any], keep: int = 50) -> None:

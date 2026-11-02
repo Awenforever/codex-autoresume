@@ -19,10 +19,60 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .state import arm_thread, load_state, save_state
 from . import __version__
+
+# a card the user placed by hand keeps its slot this long, then rejoins
+# the recency order of its pin group
+ORDER_HOLD_SECONDS = 3600
+
+
+def _ui_group_order(items, threads, now):
+    """Order one pin group: held cards keep their slot, the rest follow
+    recency, and never-placed cards (new conversations) stay on top."""
+    unplaced, frozen, free = [], [], []
+    for item in items:
+        th = threads.get(item["id"])
+        order = th.ui_order if th is not None else None
+        if order is None:
+            unplaced.append(item)
+        elif (th.ui_order_at is not None
+              and 0 <= now - th.ui_order_at < ORDER_HOLD_SECONDS):
+            frozen.append(item)
+        else:
+            free.append(item)
+
+    def recent(item):
+        return -int(item.get("updated_ms") or 0)
+
+    unplaced.sort(key=recent)
+    free.sort(key=recent)
+    placed = [i for i in items
+              if threads.get(i["id"]) is not None
+              and threads[i["id"]].ui_order is not None]
+    placed.sort(key=lambda i: (threads[i["id"]].ui_order, recent(i)))
+    slots = [None] * len(placed)
+    slot_of = {item["id"]: idx for idx, item in enumerate(placed)}
+    for item in sorted(frozen, key=lambda i: threads[i["id"]].ui_order):
+        idx = slot_of.get(item["id"], 0)
+        while idx < len(slots) and slots[idx] is not None:
+            idx += 1
+        if idx < len(slots):
+            slots[idx] = item
+        else:
+            slots.append(item)
+    fill = iter(free)
+    for idx, item in enumerate(slots):
+        if item is None:
+            try:
+                slots[idx] = next(fill)
+            except StopIteration:
+                pass
+    return unplaced + [i for i in slots if i is not None]
+
 
 PANEL_HTML = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -976,6 +1026,12 @@ function togglePin(id){
  var card=document.getElementById("tc_"+id);if(!card)return;
  var next=!t.ui_pin;
  t.ui_pin=next;
+ t.ui_order_at=Date.now()/1000;
+ var minOrd=null;
+ (window.__s&&window.__s.threads||[]).forEach(function(x){
+  if(x.id!==id&&x.ui_order!==null&&x.ui_order!==undefined&&
+   (minOrd===null||x.ui_order<minOrd))minOrd=x.ui_order});
+ t.ui_order=(minOrd===null?0:minOrd-10);
  card.classList.toggle("pinned",next);
  var btn=card.querySelector(".pinbtn");
  if(btn){btn.classList.toggle("on",next);
@@ -986,7 +1042,8 @@ function togglePin(id){
  window.__ordering=true;
  flipCards(function(){layoutThreads()});
  var pay=syncOrderState();
- api("/api/threads/reorder",{order:pay.order,pinned:pay.pinned}).then(function(r){
+ api("/api/threads/reorder",{order:pay.order,pinned:pay.pinned,
+  moved:[id]}).then(function(r){
   window.__ordering=false;
   if(r&&r.error){toast(r.error);refreshSoon()}
  }).catch(function(){window.__ordering=false;toast(L("errFail"));refreshSoon()})}
@@ -1026,17 +1083,35 @@ function flipCards(mutate){
    {transform:"translate(0,0)"}],
    {duration:220,easing:"cubic-bezier(.2,.8,.22,1)"})}}
 /* same ordering rule the server applies, so an optimistic pin move lands
-   exactly where the next poll would put it */
+   exactly where the next poll would put it: pinned first, held cards keep
+   their slot, everything else follows recency, never-placed cards on top */
+var ORDER_HOLD=3600;
+function uiRecent(a,b){return (b.updated_ms||0)-(a.updated_ms||0)}
+function groupOrder(list,now){
+ var unplaced=[],frozen=[],free=[],placed=[];
+ list.forEach(function(t){
+  if(t.ui_order===null||t.ui_order===undefined)unplaced.push(t);
+  else{placed.push(t);
+   if(t.ui_order_at&&now-t.ui_order_at>=0&&
+    now-t.ui_order_at<ORDER_HOLD)frozen.push(t);
+   else free.push(t)}});
+ unplaced.sort(uiRecent);free.sort(uiRecent);
+ placed.sort(function(a,b){
+  return (a.ui_order-b.ui_order)||uiRecent(a,b)});
+ var slots=new Array(placed.length),rank={},i;
+ for(i=0;i<placed.length;i++)rank[placed[i].id]=i;
+ frozen.sort(function(a,b){return a.ui_order-b.ui_order}).forEach(function(t){
+  var idx=rank[t.id]||0;
+  while(idx<slots.length&&slots[idx])idx++;
+  if(idx<slots.length)slots[idx]=t;else slots.push(t)});
+ var fi=0;
+ for(i=0;i<slots.length;i++)if(!slots[i])slots[i]=free[fi++];
+ return unplaced.concat(slots.filter(function(t){return!!t}))}
 function orderedThreads(){
  var s=window.__s,ts=(s&&s.threads)?s.threads.slice():[];
- return ts.sort(function(a,b){
-  var pa=a.ui_pin?0:1,pb=b.ui_pin?0:1;
-  if(pa!==pb)return pa-pb;
-  var oa=(a.ui_order===null||a.ui_order===undefined)?null:a.ui_order;
-  var ob=(b.ui_order===null||b.ui_order===undefined)?null:b.ui_order;
-  if((oa===null)!==(ob===null))return oa===null?1:-1;
-  if(oa!==null&&oa!==ob)return oa-ob;
-  return (b.updated_ms||0)-(a.updated_ms||0)})}
+ var now=Date.now()/1000;
+ return groupOrder(ts.filter(function(t){return t.ui_pin}),now).
+  concat(groupOrder(ts.filter(function(t){return !t.ui_pin}),now))}
 function layoutThreads(){
  var box=document.getElementById("threads");if(!box)return;
  var ts=orderedThreads(),i,card;
@@ -1079,7 +1154,7 @@ function onGripDown(e){
   pointerId:e.pointerId,startX:e.clientX,startY:e.clientY,lastY:e.clientY,
   grabOffset:e.clientY-r.top,origNext:card.nextElementSibling,
   pin:card.classList.contains("pinned"),wantPin:card.classList.contains("pinned"),
-  moved:false,dropping:false,ph:null,split:null,raf:0,finishTimer:0};
+  dir:0,moved:false,dropping:false,ph:null,split:null,raf:0,finishTimer:0};
  window.__dragging=true;
  try{grip.setPointerCapture(e.pointerId)}catch(x){}
  document.addEventListener("pointermove",onGripMove,{passive:false});
@@ -1108,7 +1183,8 @@ function moveDragCard(st){
 function updateDragTarget(st){
  if(!st.moved)return;
  var card=st.card;
- var cy=st.lastY-st.grabOffset+st.height/2;
+ var top=st.lastY-st.grabOffset,bottom=top+st.height;
+ var cy=top+st.height/2;
  var cards=[].slice.call(st.box.querySelectorAll(".tcard[data-id]")).
   filter(function(c){return c!==card});
  if(!cards.length){
@@ -1126,13 +1202,15 @@ function updateDragTarget(st){
  card.classList.toggle("pin-flip",newPin!==st.pin);
  var list=cards.filter(function(c){
   return newPin?c.classList.contains("pinned"):!c.classList.contains("pinned")});
+ /* tall cards should swap once the leading edge covers ~40% of the
+    next card, not after their centre has travelled a whole card */
+ var refY=st.dir>0?bottom:(st.dir<0?top:cy);
+ var frac=st.dir>0?0.4:(st.dir<0?0.6:0.5);
  var anchor=null;
  for(var i=0;i<list.length;i++){
   var r=list[i].getBoundingClientRect();
-  if(cy<r.top+r.height/2){anchor=list[i];break}}
- if(!anchor){
-  if(newPin&&split)anchor=split;
-  else if(!newPin&&split)anchor=split.nextElementSibling}
+  if(refY<r.top+r.height*frac){anchor=list[i];break}}
+ if(!anchor&&newPin&&split)anchor=split;
  if(anchor===st.ph||st.ph.nextElementSibling===anchor)return;
  flipCards(function(box){
   if(anchor&&anchor.parentNode===box)box.insertBefore(st.ph,anchor);
@@ -1176,6 +1254,7 @@ function placeDragCard(st){
 function onGripMove(e){
  var st=dragState;if(!st||st.dropping||e.pointerId!==st.pointerId)return;
  e.preventDefault();
+ if(e.clientY>st.lastY)st.dir=1;else if(e.clientY<st.lastY)st.dir=-1;
  st.lastY=e.clientY;
  if(!st.moved){
   if(Math.abs(e.clientY-st.startY)<DRAG_SLOP&&
@@ -1186,6 +1265,7 @@ function onGripUp(e){
  var st=dragState;if(!st||st.dropping||e.pointerId!==st.pointerId)return;
  if(!st.moved){
   window.__dragging=false;endPointer();dragState=null;return}
+ if(e.clientY>st.lastY)st.dir=1;else if(e.clientY<st.lastY)st.dir=-1;
  st.lastY=e.clientY;
  moveDragCard(st);updateDragTarget(st);
  dropDrag(st)}
@@ -1209,9 +1289,12 @@ function dropDrag(st){
   if(st.wantPin!==st.pin)pinPop(btn)}
  window.__orderEpoch=(window.__orderEpoch||0)+1;
  window.__ordering=true;
+ var movedT=threadById(st.id);
+ if(movedT)movedT.ui_order_at=Date.now()/1000;
  placeDragCard(st);
  var pay=syncOrderState();
- api("/api/threads/reorder",{order:pay.order,pinned:pay.pinned}).then(function(r){
+ api("/api/threads/reorder",{order:pay.order,pinned:pay.pinned,
+  moved:[st.id]}).then(function(r){
   window.__ordering=false;
   if(r&&r.error){toast(r.error);refreshSoon()}
  }).catch(function(){window.__ordering=false;toast(L("errFail"));refreshSoon()})}
@@ -1653,20 +1736,19 @@ class ControlApi:
                 "phase_at": t.phase_at if t else None,
                 "ui_pin": bool(t and t.ui_pin),
                 "ui_order": t.ui_order if t else None,
+                "ui_order_at": t.ui_order_at if t else None,
                 "updated_ms": info.updated_at_ms,
             })
-        # pinned conversations first, then manual rank. Threads the user
-        # never placed (no ui_order) float above the manual order by
-        # recency, so a fresh conversation never disappears below an old
-        # arrangement.
-        def _ui_key(item):
-            th = st.threads.get(item["id"])
-            order = th.ui_order if th is not None else None
-            return (0 if (th is not None and th.ui_pin) else 1,
-                    0 if order is None else 1,
-                    order if order is not None else 0,
-                    -int(item.get("updated_ms") or 0))
-        out_threads.sort(key=_ui_key)
+        # pinned conversations first. Inside a group, cards placed by hand
+        # keep their slot for a while (ORDER_HOLD_SECONDS); everything else
+        # follows recency. Threads the user never placed (no ui_order) stay
+        # above the group, so a fresh conversation appears right below the
+        # pinned shelf.
+        _now = time.time()
+        _pinned = [i for i in out_threads if i.get("ui_pin")]
+        _unpinned = [i for i in out_threads if not i.get("ui_pin")]
+        out_threads = (_ui_group_order(_pinned, st.threads, _now)
+                       + _ui_group_order(_unpinned, st.threads, _now))
         # show what the planner acts on: first-hand interruption evidence
         # overrides a snapshot that still trails at 99% after the account
         # already refused a turn
@@ -1850,7 +1932,10 @@ class ControlApi:
                 prio = 0
             t.priority = max(0, prio)
         if "ui_pin" in payload:
-            t.ui_pin = bool(payload["ui_pin"])
+            pin = bool(payload["ui_pin"])
+            if pin != t.ui_pin:
+                t.ui_order_at = time.time()
+            t.ui_pin = pin
         save_state(st)
         self.daemon._state_mtime = os.path.getmtime(st.state_path)
         return {"thread": thread_id, "guard": t.manual,
@@ -1873,10 +1958,18 @@ class ControlApi:
         pinned = payload.get("pinned")
         pinned_set = (set(x for x in pinned if isinstance(x, str))
                       if isinstance(pinned, list) else set())
+        moved = payload.get("moved")
+        # older callers send no ``moved``; treat the whole arrangement as
+        # deliberate so their order still holds for a while
+        moved_set = (set(x for x in moved if isinstance(x, str))
+                     if isinstance(moved, list) else None)
+        now = time.time()
         for idx, thread_id in enumerate(order):
             t = st.thread(thread_id)
             t.ui_order = idx * 10
             t.ui_pin = thread_id in pinned_set
+            if moved_set is None or thread_id in moved_set:
+                t.ui_order_at = now
         save_state(st)
         self.daemon._state_mtime = os.path.getmtime(st.state_path)
         return {"ordered": len(order),

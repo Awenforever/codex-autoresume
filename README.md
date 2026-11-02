@@ -80,8 +80,10 @@ Codex Guard does that for you, and it does it the way you would:
   other cards slide aside to open a gap, and it settles into place on drop.
   Pinned conversations rise above a hairline divider; drag a card across it
   to pin or unpin in one gesture, with the pin icon popping as it flips.
-  Order and pins persist across restarts, and the controls stay invisible
-  until hover.
+  A card you place by hand keeps its slot for one hour; the rest of its
+  group still auto-sorts by recent activity, and a newly created
+  conversation starts at the top of its group. Order and pins persist
+  across restarts, and the controls stay invisible until hover.
 - **Armed after the fact still works.** Enabled the guard after the
   interruption already happened? It adopts the conversation's newest failed
   turn (kind, reset time, original message) on the next heartbeat — never a
@@ -359,7 +361,7 @@ ChatGPT 的额度限制（5 小时窗口 / 周额度）打断 Codex 任务时，
 - **被你中途停掉的回复会自动接上。** 回复中途点了停止、按钮翻成「继续」？守护能识别被打断的回合，并用与应用「继续」按钮相同的 RPC 继续任务——绝不像发消息那样往对话里注入 prompt。超过 `stopped_continue_max_age_hours` 的停止视为已完成的工作，不再处理。
 - **带真实出口的继续指令。** 内置指令要求模型先核验磁盘上的真实状态（文件、`git status`、最后一次输出），不信任聊天记录；不复述、不重做已完成的工作；goal 只有验收检查真的跑过并通过才算完成；任务已完成、验收无法通过、或下一步涉及破坏性操作/需要人决定时，停下来报告。自动唤醒得到的是工作，不是闲聊。逐会话自定义指令仍然有效。
 - **状态来自事实，不来自模型措辞。** 每张守护卡片只带一个安静的状态胶囊：守护中、运行中、等待（额度/容量/预算）、受阻、阶段完成、已续跑、✓ 已完成、已暂停、已停止。✓ 已完成是权威状态：只有 goal 在数据库里的状态真的变成 `complete` 才会翻转，绝不因为模型在回复里说「完成了」。普通对话只显示 **已续跑**（守护送达了一轮，接下来交给你）——只有 `/goal` 才存在真正的「完成」。翻转会写入历史并触发提醒通知；守护保持开启，由你决定继续还是关闭。
-- **置顶与排序，不常驻任何多余控件。** 悬停卡片标题栏会出现图钉和拖动手柄。置顶的对话升到一条细分隔线之上；把卡片拖过分隔线即可一次完成置顶或取消置顶。顺序与置顶在守护重启后保留，图标只在悬停时出现。
+- **置顶与排序，不常驻任何多余控件。** 悬停卡片标题栏会出现图钉和拖动手柄。置顶的对话升到一条细分隔线之上；把卡片拖过分隔线即可一次完成置顶或取消置顶。手动拖过的卡片 1 小时内保持位置，同级其余卡片仍按最近活跃时间自动排序；新建对话创建时直接排在所在分组第一位。顺序与置顶在守护重启后保留，图标只在悬停时出现。
 - **中断后再开启守护也有效。** 守护启用前就已经因额度中断？下一个心跳会读取会话最新的失败回合（类型、重置时间、原始消息）作为依据，不靠猜。而且只认最新回合：一旦你已自行继续或结束对话，旧额度证据会被丢弃，不会往对话里注入 prompt。
 - **优先级，像 Windows 网络跃迁。** 每个会话可设优先级（0 最高，也是默认）：同优先级同时恢复，低优先级要等高优先级的任务跑完才继续。
 - **周额度守护 + 重置卡。** 可选择让 goal 跨越周重置继续跑；周额度耗尽且账户有官方重置卡时可自动消耗（按会话开启）。

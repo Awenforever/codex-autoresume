@@ -1,7 +1,8 @@
 # Design notes & prior-art survey
 
-Date: 2026-10-24. Updated 2026-11-02 for 0.4.1 (guard lifecycle, resume
-prompt, direct-drag panel order). Target: OpenAI Codex with the sqlite state layout
+Date: 2026-10-24. Updated 2026-11-02 for 0.4.2 (guard lifecycle, resume
+prompt, direct-drag panel order, one-hour manual-order hold). Target: OpenAI
+Codex with the sqlite state layout
 (codex-cli 0.15x+ / desktop app 26.x). This document records why the tool
 exists, what was reused, and the ground-truth observations it is built on.
 
@@ -216,23 +217,36 @@ goal database, and ordinary threads can only ever report "delivered"; an
 asynchronous harness must check artifacts, not rely on the model's claim.
 Per-thread prompt overrides remain for users with special tasks.
 
-## 8. Panel order (0.4.0)
+## 8. Panel order (0.4.2)
 
-- `ui_pin` and `ui_order` live in `state.json` (they are UI state, not
-  config); both survive daemon restarts.
-- Sort: pinned first; inside a group, threads never placed by the user float
-  above manual ranks by recency; placed threads follow `ui_order`.
-- The client sends the complete visible order plus the pinned set to
-  `/api/threads/reorder`; the server writes rank and group in one atomic
-  state save, so a drop across the divider can pin/unpin and reorder together.
+- `ui_pin`, `ui_order` and `ui_order_at` live in `state.json` (they are UI
+  state, not config); all survive daemon restarts.
+- Sort: pinned first. Inside a pin group, a card the user placed by hand
+  keeps its ordinal slot for one hour (`ORDER_HOLD_SECONDS`, stamped in
+  `ui_order_at`); the other cards fill the remaining slots by recency. Once
+  the hour expires, the card rejoins its group's recency order. Cards that
+  were never placed (`ui_order is null`, e.g. a conversation created while
+  the panel is open) stay at the top of their group.
+- `/api/status` applies this rule server-side (`_ui_group_order`), and the
+  panel mirrors it optimistically (`groupOrder`), so the order does not jump
+  between a drop and the next 15s refresh.
+- The client sends the complete visible order, the pinned set and the ids the
+  user actually moved to `/api/threads/reorder`; the server writes rank,
+  group and hold timestamp in one atomic state save, so a drop across the
+  divider can pin/unpin and reorder together. Pinning a card also places it
+  at the top of its new group and holds it.
 - Affordances are hover-only: a grip and a pin in the card header, plus a
   single hairline between groups.
 - Dragging moves the card itself: the real card is lifted out of the flow
   and follows the pointer (no HTML5 ghost), a quiet placeholder keeps its
   height, and FLIP transforms slide the other cards aside live as the target
-  gap moves. Dropping settles the card into the slot with a short animation
-  and one reorder POST — never an innerHTML rebuild. Escape, or a cancelled
-  pointer, returns the card to its original slot without a request.
+  gap moves. The gap moves as soon as the card's leading edge (bottom when
+  dragging down, top when dragging up) covers ~40% of the next card, so a
+  tall card swaps after about 40% of its height instead of waiting for its
+  centre to travel a full card. Dropping settles the card into the slot with
+  a short animation and one reorder POST — never an innerHTML rebuild.
+  Escape, or a cancelled pointer, returns the card to its original slot
+  without a request.
 - Pinning is optimistic: the icon pops, the pinned class flips immediately,
   the card slides to its new group with the same FLIP, and the reorder POST
   follows. Dropping exactly on the boundary keeps the previous pin state, so
