@@ -307,20 +307,30 @@ outline-offset:1px}
 .iconbtn svg{width:13px;height:13px;display:block;pointer-events:none}
 .tcard:hover .iconbtn{opacity:.5}
 .tcard:hover .iconbtn:hover{opacity:1}
+.tcard .pinbtn{transition:opacity .15s ease,color .15s ease,background .15s ease,
+transform .2s cubic-bezier(.34,1.56,.64,1)}
+.tcard .pinbtn svg{transition:fill-opacity .18s ease}
 .tcard .pinbtn.on{opacity:1;color:var(--accent)}
 .tcard .pinbtn.on svg{fill:currentColor;fill-opacity:.22}
-.tcard .grip{cursor:grab}
+.tcard .grip{cursor:grab;touch-action:none}
 .tcard .grip:active{cursor:grabbing}
+body.dragging{cursor:grabbing;user-select:none}
 body.dragging .tcard:hover{transform:none;
 box-shadow:var(--glass-hi),var(--glass-shadow-sm)}
 body.dragging .tcard:hover .iconbtn{opacity:.5}
-.tcard.dragging{opacity:.38;border-style:dashed}
-.tcard.dragging:hover{transform:none}
-.tcard.dropbefore:before,.tcard.dropafter:after{content:"";position:absolute;
-left:14px;right:14px;height:2px;border-radius:2px;background:var(--accent);
-box-shadow:0 0 9px rgba(var(--accent-rgb),.55);pointer-events:none}
-.tcard.dropbefore:before{top:-6px}
-.tcard.dropafter:after{bottom:-6px}
+body.dragging .tcard .tipn:after{opacity:0!important}
+/* the lifted card itself follows the pointer; the gap it leaves behind is a
+   quiet slot, and the rest of the list slides into place around it */
+.tcard.drag-card{position:fixed!important;top:0;z-index:900;margin:0;
+transition:none!important;pointer-events:none;cursor:grabbing;
+box-shadow:0 22px 44px rgba(0,0,0,.24),0 4px 14px rgba(0,0,0,.14),
+var(--glass-hi)}
+.tcard.drag-card:hover{transform:none}
+.tcard.drag-card.pin-flip{border-color:rgba(var(--accent-rgb),.55)}
+.dragph{flex:none;border-radius:16px;margin-bottom:10px;
+background:rgba(var(--accent-rgb),.05);
+box-shadow:inset 0 0 0 1px rgba(var(--accent-rgb),.16);
+transition:background .2s ease,box-shadow .2s ease}
 /* the only line between the pinned shelf and the rest of the list */
 .pinsplit{height:1px;margin:13px 5px 11px;
 background:linear-gradient(90deg,transparent,var(--line) 18%,var(--line) 82%,transparent)}
@@ -482,7 +492,7 @@ button:hover,.tcard:hover{transform:none}}
 </div>
 </div>
 <div class="sect" data-i18n="recent">Recent conversations</div>
-<div id="threads" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropCard(event)" ondragend="dragEnd()"></div>
+<div id="threads"></div>
 <div class="foot" id="foot"></div>
 <div id="updOverlay" onclick="if(event.target===this)closeUpdate()">
  <div class="modal">
@@ -926,6 +936,7 @@ function runUpdate(){
 function threadsInteractive(){
 var b=document.getElementById("threads");if(!b)return false;
 if(window.__dragging)return true;
+if(window.__ordering)return true;
 if(b.querySelector(".dd.open"))return true;
 var a=document.activeElement;
 return !!(a&&b.contains(a)&&(a.tagName==="INPUT"||a.tagName==="TEXTAREA"))}
@@ -960,77 +971,276 @@ var s=window.__s;if(!s||!s.threads)return null;
 for(var i=0;i<s.threads.length;i++)if(s.threads[i].id===id)return s.threads[i];
 return null}
 function togglePin(id){
-var t=threadById(id);if(!t)return;
-api("/api/threads/"+id,{ui_pin:!t.ui_pin}).then(function(r){
-if(r&&r.error){toast(r.error);return}
-refresh()}).catch(function(){toast(L("errFail"))})}
-var dragId=null;
-function dragStart(e){
-var grip=e.target.closest?e.target.closest(".grip"):null;if(!grip)return;
-var card=grip.closest(".tcard");if(!card)return;
-dragId=card.getAttribute("data-id");
-window.__dragging=true;document.body.classList.add("dragging");
-card.classList.add("dragging");
-try{e.dataTransfer.effectAllowed="move";
-e.dataTransfer.setData("text/plain",dragId);
-e.dataTransfer.setDragImage(card,26,22)}catch(x){}}
-function dragOver(e){
-if(!dragId)return;
-e.preventDefault();e.dataTransfer.dropEffect="move";
-var box=document.getElementById("threads");
-var cards=[].slice.call(box.querySelectorAll(".tcard[data-id]"));
-var others=cards.filter(function(c){return c.getAttribute("data-id")!==dragId});
-for(var i=0;i<others.length;i++)others[i].classList.remove("dropbefore","dropafter");
-if(!others.length)return;
-var idx=others.length;
-for(var j=0;j<others.length;j++){
-var r=others[j].getBoundingClientRect();
-if(e.clientY<r.top+r.height/2){idx=j;break}}
-if(idx<others.length)others[idx].classList.add("dropbefore");
-else others[others.length-1].classList.add("dropafter");
-window.__dropIdx=idx}
-function dragLeave(e){
-if(!dragId)return;
-var box=document.getElementById("threads");
-if(e.relatedTarget&&box.contains(e.relatedTarget))return;
-var d=box.querySelectorAll(".dropbefore,.dropafter");
-for(var i=0;i<d.length;i++)d[i].classList.remove("dropbefore","dropafter");
-window.__dropIdx=null}
-function dragEnd(){
-window.__dragging=false;dragId=null;window.__dropIdx=null;
-document.body.classList.remove("dragging");
-var box=document.getElementById("threads");if(!box)return;
-var d=box.querySelectorAll(".dragging,.dropbefore,.dropafter");
-for(var i=0;i<d.length;i++)d[i].classList.remove("dragging","dropbefore","dropafter")}
-function dropCard(e){
-if(!dragId)return;
-e.preventDefault();
-var box=document.getElementById("threads");
-var dragged=box.querySelector('.tcard[data-id="'+dragId+'"]');
-var cards=[].slice.call(box.querySelectorAll(".tcard[data-id]"));
-var others=cards.filter(function(c){return c!==dragged});
-var idx=window.__dropIdx;
-if(idx===undefined||idx===null)idx=others.length;
-/* crossing the divider changes the pin state; right ON the boundary the
-   card keeps the state it came with, so a small mis-drop never flips it */
-var pinnedCount=0;
-for(var i=0;i<others.length;i++)if(others[i].classList.contains("pinned"))pinnedCount++;
-var wasPin=!!(dragged&&dragged.classList.contains("pinned"));
-var newPin=(idx<pinnedCount)?true:(idx>pinnedCount?false:wasPin);
-var ids=others.map(function(c){return c.getAttribute("data-id")});
-ids.splice(idx,0,dragId);
-var pmap={};
-others.forEach(function(c){pmap[c.getAttribute("data-id")]=
-c.classList.contains("pinned")});
-pmap[dragId]=newPin;
-var pinned=ids.filter(function(id){return pmap[id]});
-dragEnd();
-api("/api/threads/reorder",{order:ids,pinned:pinned}).then(function(r){
-if(r&&r.error){toast(r.error);return}
-refresh()}).catch(function(){toast(L("errFail"));refresh()})}
+ if(dragState||window.__ordering)return;
+ var t=threadById(id);if(!t)return;
+ var card=document.getElementById("tc_"+id);if(!card)return;
+ var next=!t.ui_pin;
+ t.ui_pin=next;
+ card.classList.toggle("pinned",next);
+ var btn=card.querySelector(".pinbtn");
+ if(btn){btn.classList.toggle("on",next);
+  var tip=next?L("unpinTip"):L("pinTip");
+  btn.setAttribute("data-tip",tip);btn.setAttribute("aria-label",tip);
+  pinPop(btn)}
+ window.__orderEpoch=(window.__orderEpoch||0)+1;
+ window.__ordering=true;
+ flipCards(function(){layoutThreads()});
+ var pay=syncOrderState();
+ api("/api/threads/reorder",{order:pay.order,pinned:pay.pinned}).then(function(r){
+  window.__ordering=false;
+  if(r&&r.error){toast(r.error);refreshSoon()}
+ }).catch(function(){window.__ordering=false;toast(L("errFail"));refreshSoon()})}
+function refreshSoon(){
+ setTimeout(function(){
+  if(!window.__dragging&&!window.__ordering)refresh()},DRAG_ANIM+80)}
+var dragState=null;
+var DRAG_SLOP=4;
+var DRAG_ANIM=230;
+function reduceMotion(){try{
+ return !!(window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+}catch(e){return false}}
+function animEl(el,frames,o){
+ if(!el||!el.animate||reduceMotion())return null;
+ try{return el.animate(frames,o)}catch(e){return null}}
+function pinPop(btn){animEl(btn,[
+ {transform:"scale(.55) rotate(-22deg)"},
+ {transform:"scale(1.24) rotate(7deg)",offset:.55},
+ {transform:"scale(1) rotate(0)"}],
+ {duration:340,easing:"cubic-bezier(.34,1.56,.64,1)"})}
+/* FLIP: measure, mutate, then let every element that moved glide to its new
+   slot instead of jumping there */
+function flipCards(mutate){
+ var box=document.getElementById("threads");if(!box)return;
+ var els=[].slice.call(box.children).filter(function(el){
+  return el.classList&&((el.classList.contains("tcard")&&
+   !el.classList.contains("drag-card"))||el.classList.contains("pinsplit"))});
+ var first=els.map(function(el){var r=el.getBoundingClientRect();
+  return{left:r.left,top:r.top}});
+ mutate(box);
+ for(var i=0;i<els.length;i++){
+  var el=els[i];if(!el.parentNode)continue;
+  var r=el.getBoundingClientRect();
+  var dx=first[i].left-r.left,dy=first[i].top-r.top;
+  if(Math.abs(dx)<.5&&Math.abs(dy)<.5)continue;
+  animEl(el,[{transform:"translate("+dx+"px,"+dy+"px)"},
+   {transform:"translate(0,0)"}],
+   {duration:220,easing:"cubic-bezier(.2,.8,.22,1)"})}}
+/* same ordering rule the server applies, so an optimistic pin move lands
+   exactly where the next poll would put it */
+function orderedThreads(){
+ var s=window.__s,ts=(s&&s.threads)?s.threads.slice():[];
+ return ts.sort(function(a,b){
+  var pa=a.ui_pin?0:1,pb=b.ui_pin?0:1;
+  if(pa!==pb)return pa-pb;
+  var oa=(a.ui_order===null||a.ui_order===undefined)?null:a.ui_order;
+  var ob=(b.ui_order===null||b.ui_order===undefined)?null:b.ui_order;
+  if((oa===null)!==(ob===null))return oa===null?1:-1;
+  if(oa!==null&&oa!==ob)return oa-ob;
+  return (b.updated_ms||0)-(a.updated_ms||0)})}
+function layoutThreads(){
+ var box=document.getElementById("threads");if(!box)return;
+ var ts=orderedThreads(),i,card;
+ var old=box.querySelector(".pinsplit");if(old)old.parentNode.removeChild(old);
+ for(i=0;i<ts.length;i++){card=document.getElementById("tc_"+ts[i].id);
+  if(card)box.appendChild(card)}
+ var hadPin=false,firstUn=null;
+ for(i=0;i<ts.length;i++){
+  if(ts[i].ui_pin){hadPin=true;continue}
+  if(!firstUn)firstUn=document.getElementById("tc_"+ts[i].id)}
+ if(hadPin){
+  var split=document.createElement("div");split.className="pinsplit";
+  if(firstUn)box.insertBefore(split,firstUn);else box.appendChild(split)}
+ var s=window.__s;if(s)s.threads=ts}
+function syncOrderState(){
+ var box=document.getElementById("threads"),s=window.__s;
+ if(!box||!s||!s.threads)return{order:[],pinned:[]};
+ var cards=[].slice.call(box.querySelectorAll(".tcard[data-id]"));
+ var byId={};s.threads.forEach(function(t){byId[t.id]=t});
+ var out=[];
+ for(var i=0;i<cards.length;i++){
+  var id=cards[i].getAttribute("data-id"),t=byId[id];if(!t)continue;
+  t.ui_order=i*10;t.ui_pin=cards[i].classList.contains("pinned");
+  out.push(t);delete byId[id]}
+ for(var k in byId)out.push(byId[k]);
+ s.threads=out;
+ return{order:out.map(function(t){return t.id}),
+  pinned:out.filter(function(t){return t.ui_pin}).map(function(t){return t.id})}}
+function onGripDown(e){
+ if(dragState)return;
+ if(e.button!==undefined&&e.button!==0)return;
+ var grip=e.target&&e.target.closest?e.target.closest(".grip"):null;
+ if(!grip)return;
+ var card=grip.closest(".tcard");if(!card)return;
+ var box=document.getElementById("threads");if(!box||!box.contains(card))return;
+ if(card.classList.contains("drag-card"))return;
+ e.preventDefault();
+ var r=card.getBoundingClientRect();
+ dragState={id:card.getAttribute("data-id"),card:card,box:box,grip:grip,
+  pointerId:e.pointerId,startX:e.clientX,startY:e.clientY,lastY:e.clientY,
+  grabOffset:e.clientY-r.top,origNext:card.nextElementSibling,
+  pin:card.classList.contains("pinned"),wantPin:card.classList.contains("pinned"),
+  moved:false,dropping:false,ph:null,split:null,raf:0,finishTimer:0};
+ window.__dragging=true;
+ try{grip.setPointerCapture(e.pointerId)}catch(x){}
+ document.addEventListener("pointermove",onGripMove,{passive:false});
+ document.addEventListener("pointerup",onGripUp,true);
+ document.addEventListener("pointercancel",onGripCancel,true);
+ window.addEventListener("keydown",onDragKey,true)}
+function beginDrag(st){
+ var card=st.card,r,ph;
+ document.body.classList.add("dragging");
+ var dds=document.querySelectorAll("#threads .dd.open");
+ for(var i=0;i<dds.length;i++)dds[i].classList.remove("open");
+ r=card.getBoundingClientRect();
+ st.origLeft=r.left;st.origTop=r.top;st.height=r.height;st.width=r.width;
+ ph=document.createElement("div");ph.className="dragph";
+ ph.style.height=st.height+"px";
+ card.parentNode.insertBefore(ph,card);
+ st.ph=ph;st.split=st.box.querySelector(".pinsplit");
+ card.style.left=st.origLeft+"px";card.style.top="0px";
+ card.style.width=st.width+"px";card.style.height=st.height+"px";
+ card.classList.add("drag-card");
+ st.moved=true;
+ st.raf=requestAnimationFrame(dragTick)}
+function moveDragCard(st){
+ var y=st.lastY-st.grabOffset;
+ st.card.style.transform="translate3d(0,"+y+"px,0) scale(1.015)"}
+function updateDragTarget(st){
+ if(!st.moved)return;
+ var card=st.card;
+ var cy=st.lastY-st.grabOffset+st.height/2;
+ var cards=[].slice.call(st.box.querySelectorAll(".tcard[data-id]")).
+  filter(function(c){return c!==card});
+ if(!cards.length){
+  card.classList.remove("pin-flip");st.wantPin=st.pin;return}
+ var split=st.split;
+ if(split&&!st.box.contains(split))split=st.split=null;
+ var newPin=st.pin;
+ if(split){
+  var sr=split.getBoundingClientRect(),mid=sr.top+sr.height/2;
+  if(cy<mid-8)newPin=true;
+  else if(cy>mid+8)newPin=false;
+  /* right on the line the card keeps the state it came with */
+ }else newPin=st.pin;
+ st.wantPin=newPin;
+ card.classList.toggle("pin-flip",newPin!==st.pin);
+ var list=cards.filter(function(c){
+  return newPin?c.classList.contains("pinned"):!c.classList.contains("pinned")});
+ var anchor=null;
+ for(var i=0;i<list.length;i++){
+  var r=list[i].getBoundingClientRect();
+  if(cy<r.top+r.height/2){anchor=list[i];break}}
+ if(!anchor){
+  if(newPin&&split)anchor=split;
+  else if(!newPin&&split)anchor=split.nextElementSibling}
+ if(anchor===st.ph||st.ph.nextElementSibling===anchor)return;
+ flipCards(function(box){
+  if(anchor&&anchor.parentNode===box)box.insertBefore(st.ph,anchor);
+  else box.appendChild(st.ph)})}
+function dragTick(){
+ var st=dragState;if(!st||!st.moved)return;
+ var y=st.lastY,vh=window.innerHeight,edge=64,sp=0;
+ if(y<edge)sp=-Math.ceil((edge-y)/edge*16);
+ else if(y>vh-edge)sp=Math.ceil((y-(vh-edge))/edge*16);
+ if(sp){window.scrollBy(0,sp);updateDragTarget(st)}
+ st.raf=requestAnimationFrame(dragTick)}
+function endPointer(){
+ var st=dragState;
+ if(st){
+  if(st.raf)cancelAnimationFrame(st.raf);
+  st.raf=0;
+  try{if(st.grip.hasPointerCapture&&st.grip.hasPointerCapture(st.pointerId))
+   st.grip.releasePointerCapture(st.pointerId)}catch(x){}}
+ document.removeEventListener("pointermove",onGripMove);
+ document.removeEventListener("pointerup",onGripUp,true);
+ document.removeEventListener("pointercancel",onGripCancel,true);
+ window.removeEventListener("keydown",onDragKey,true)}
+function settleDone(st){
+ if(dragState!==st)return;
+ window.__dragging=false;document.body.classList.remove("dragging");
+ endPointer();dragState=null}
+function placeDragCard(st){
+ var card=st.card,ph=st.ph,box=st.box;
+ var vr=card.getBoundingClientRect();
+ box.insertBefore(card,ph);box.removeChild(ph);
+ card.classList.remove("drag-card");
+ card.style.left="";card.style.top="";
+ card.style.width="";card.style.height="";card.style.transform="";
+ var tr=card.getBoundingClientRect();
+ var a=animEl(card,[{transform:"translate("+(vr.left-tr.left)+"px,"+
+  (vr.top-tr.top)+"px) scale(1.015)"},{transform:"translate(0,0) scale(1)"}],
+  {duration:DRAG_ANIM,easing:"cubic-bezier(.2,.8,.22,1)"});
+ if(a&&a.finished){a.finished.then(function(){settleDone(st)}).catch(function(){
+  settleDone(st)})}
+ else st.finishTimer=setTimeout(function(){settleDone(st)},0)}
+function onGripMove(e){
+ var st=dragState;if(!st||st.dropping||e.pointerId!==st.pointerId)return;
+ e.preventDefault();
+ st.lastY=e.clientY;
+ if(!st.moved){
+  if(Math.abs(e.clientY-st.startY)<DRAG_SLOP&&
+   Math.abs(e.clientX-st.startX)<DRAG_SLOP)return;
+  beginDrag(st)}
+ moveDragCard(st);updateDragTarget(st)}
+function onGripUp(e){
+ var st=dragState;if(!st||st.dropping||e.pointerId!==st.pointerId)return;
+ if(!st.moved){
+  window.__dragging=false;endPointer();dragState=null;return}
+ st.lastY=e.clientY;
+ moveDragCard(st);updateDragTarget(st);
+ dropDrag(st)}
+function onGripCancel(e){
+ var st=dragState;if(!st||e.pointerId!==st.pointerId)return;
+ cancelDrag(st)}
+function onDragKey(e){
+ if(e.key!=="Escape"||!dragState)return;
+ e.preventDefault();cancelDrag(dragState)}
+function dropDrag(st){
+ if(!st||st.dropping||st.finishTimer)return;
+ st.dropping=true;
+ if(st.raf)cancelAnimationFrame(st.raf);st.raf=0;
+ var card=st.card,btn=card.querySelector(".pinbtn");
+ card.classList.remove("pin-flip");
+ card.classList.toggle("pinned",st.wantPin);
+ if(btn){
+  btn.classList.toggle("on",st.wantPin);
+  var tip=st.wantPin?L("unpinTip"):L("pinTip");
+  btn.setAttribute("data-tip",tip);btn.setAttribute("aria-label",tip);
+  if(st.wantPin!==st.pin)pinPop(btn)}
+ window.__orderEpoch=(window.__orderEpoch||0)+1;
+ window.__ordering=true;
+ placeDragCard(st);
+ var pay=syncOrderState();
+ api("/api/threads/reorder",{order:pay.order,pinned:pay.pinned}).then(function(r){
+  window.__ordering=false;
+  if(r&&r.error){toast(r.error);refreshSoon()}
+ }).catch(function(){window.__ordering=false;toast(L("errFail"));refreshSoon()})}
+function cancelDrag(st){
+ if(!st||st.dropping||st.finishTimer)return;
+ st.dropping=true;
+ if(!st.moved){
+  window.__dragging=false;endPointer();dragState=null;return}
+ if(st.raf)cancelAnimationFrame(st.raf);st.raf=0;
+ var card=st.card,ph=st.ph,box=st.box,btn=card.querySelector(".pinbtn");
+ card.classList.remove("pin-flip");
+ st.wantPin=st.pin;
+ if(btn){
+  btn.classList.toggle("on",st.pin);
+  var tip=st.pin?L("unpinTip"):L("pinTip");
+  btn.setAttribute("data-tip",tip);btn.setAttribute("aria-label",tip)}
+ var target=st.origNext;
+ if(target&&target.parentNode!==box)target=null;
+ if(ph.nextElementSibling!==target){
+  flipCards(function(){
+   if(target&&target.parentNode===box)box.insertBefore(ph,target);
+   else box.appendChild(ph)})}
+ placeDragCard(st)}
+document.addEventListener("pointerdown",onGripDown,{passive:false});
 function refresh(){
+var epoch=window.__orderEpoch||0;
 return api("/api/status").then(function(s){
-window.__s=s;
+var stale=(window.__orderEpoch||0)!==epoch||!!window.__ordering;
+if(!stale)window.__s=s;
 syncUpdateUi(s);
 var q=s.quota;
 var annRows=annRowsFor(s);
@@ -1083,7 +1293,7 @@ esc(pinfo.label)+"</span>":
 (t.goal_status?'<span class="badge gstat">'+esc(gstat(t.goal_status))+"</span>":
 (!t.is_goal&&t.run?'<span class="badge '+(t.run==="running"?"run":"gstat")+'">'+
 esc(t.run==="running"?L("stRunning"):L("stWaiting"))+"</span>":"")));
-var gripBtn='<span class="iconbtn grip tipn end" draggable="true" aria-hidden="true" data-tip="'+
+var gripBtn='<span class="iconbtn grip tipn end" aria-hidden="true" data-tip="'+
 esc(L("dragTip"))+'"><svg viewBox="0 0 10 16"><g fill="currentColor">'+
 '<circle cx="3" cy="3.2" r="1.25"/><circle cx="3" cy="8" r="1.25"/>'+
 '<circle cx="3" cy="12.8" r="1.25"/><circle cx="7" cy="3.2" r="1.25"/>'+
@@ -1174,7 +1384,7 @@ cardSwitch+"</div>"+
 }
 /* never rebuild the list under an open dropdown or mid-typing: the
    rebuild is what used to swallow the dropdown the instant it opened */
-if(!threadsInteractive()){
+if(!stale&&!threadsInteractive()){
 document.getElementById("threads").innerHTML=rows||
 '<div class="card empty">'+L("noThread")+"</div>"}
 }).catch(function(e){

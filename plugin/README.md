@@ -104,12 +104,16 @@ conversation. / 普通（无 goal）会话不会显示“已完成”：守护�
 
 Hover a card: a grip and a pin appear on the right of its title, nothing else
 changes. Drag the grip to reorder within a section, or drop the card above the
-section divider to pin it (drop it below the divider to unpin). Pinned cards
-float first; the arrangement is stored locally and survives restarts.
+section divider to pin it (drop it below the divider to unpin). While you drag,
+the card follows the pointer and the other cards slide aside to open its slot;
+it settles into place on drop, and the pin icon pops when a card changes
+groups. Pinned cards float first; the arrangement is stored locally and
+survives restarts.
 
-悬停卡片：标题右侧出现拖动柄与置顶按钮，其余不变。拖拖动柄可在分组内排序，
-把卡片拖过分隔线上方即置顶（拖到下方即取消置顶）。置顶卡片排在最前，顺序
-保存在本地，重启后保持。
+悬停卡片：标题右侧出现拖动柄与置顶按钮，其余不变。拖动柄可在分组内排序，
+把卡片拖过分隔线上方即置顶（拖到下方即取消置顶）。拖动时卡片跟随指针，
+其余卡片会滑动让出位置，松手后卡片动画落位，切换分组时置顶图标弹跳。
+置顶卡片排在最前，顺序保存在本地，重启后保持。
 
 ## Using it from a conversation / 对话内用法（costs a little quota / 会消耗少量额度）
 

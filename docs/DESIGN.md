@@ -1,7 +1,7 @@
 # Design notes & prior-art survey
 
-Date: 2026-10-24. Updated 2026-11-02 for 0.4.0 (guard lifecycle, resume
-prompt, panel order). Target: OpenAI Codex with the sqlite state layout
+Date: 2026-10-24. Updated 2026-11-02 for 0.4.1 (guard lifecycle, resume
+prompt, direct-drag panel order). Target: OpenAI Codex with the sqlite state layout
 (codex-cli 0.15x+ / desktop app 26.x). This document records why the tool
 exists, what was reused, and the ground-truth observations it is built on.
 
@@ -225,7 +225,15 @@ Per-thread prompt overrides remain for users with special tasks.
 - The client sends the complete visible order plus the pinned set to
   `/api/threads/reorder`; the server writes rank and group in one atomic
   state save, so a drop across the divider can pin/unpin and reorder together.
-- Affordances are hover-only: a grip and a pin in the card header, a single
-  hairline between groups, and an accent insertion bar while dragging.
-  Dropping exactly on the boundary keeps the previous pin state, so a near
-  miss cannot flip a card between groups.
+- Affordances are hover-only: a grip and a pin in the card header, plus a
+  single hairline between groups.
+- Dragging moves the card itself: the real card is lifted out of the flow
+  and follows the pointer (no HTML5 ghost), a quiet placeholder keeps its
+  height, and FLIP transforms slide the other cards aside live as the target
+  gap moves. Dropping settles the card into the slot with a short animation
+  and one reorder POST — never an innerHTML rebuild. Escape, or a cancelled
+  pointer, returns the card to its original slot without a request.
+- Pinning is optimistic: the icon pops, the pinned class flips immediately,
+  the card slides to its new group with the same FLIP, and the reorder POST
+  follows. Dropping exactly on the boundary keeps the previous pin state, so
+  a near miss cannot flip a card between groups.

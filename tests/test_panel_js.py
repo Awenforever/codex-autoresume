@@ -587,7 +587,7 @@ class PanelDropdownTest(unittest.TestCase):
         js = _panel_js()
         self.assertIn('b.querySelector(".dd.open")', js)
         self.assertIn('a.tagName==="INPUT"', js)
-        self.assertIn("if(!threadsInteractive()){", js)
+        self.assertIn("if(!stale&&!threadsInteractive()){", js)
         # the guarded assignment is the one that writes the rows
         body = _fn(js, "refresh")
         self.assertIn("threadsInteractive()", body)
@@ -868,3 +868,71 @@ setTimeout(function(){
         self.assertNotIn(["open"], failed)
         # with a red dot the logo opens the modal without touching the network
         self.assertEqual(got["reddot"], [["open"]])
+
+
+class PanelDragTest(unittest.TestCase):
+    """Cards follow the pointer; siblings shift live; no ghost, no snap."""
+
+    def test_pointer_drag_replaces_html5_ghost(self):
+        from codex_autoresume.control import PANEL_HTML
+        js = _panel_js()
+        self.assertNotIn("setDragImage", js)
+        self.assertNotIn("draggable", js.lower())
+        self.assertNotIn("dropbefore", js)
+        self.assertNotIn("dropafter", js)
+        self.assertNotIn("dataTransfer", js)
+        self.assertIn('document.addEventListener("pointerdown",onGripDown', js)
+        self.assertIn('if(e.key!=="Escape"', js)
+        self.assertIn("touch-action:none", PANEL_HTML)
+        self.assertIn(".tcard.drag-card{position:fixed!important", PANEL_HTML)
+        self.assertIn('ph.className="dragph"', js)
+        self.assertIn("function dragTick(", js)
+
+    def test_siblings_shift_live_and_card_settles_without_rebuild(self):
+        from codex_autoresume.control import PANEL_HTML
+        js = _panel_js()
+        flip = _fn(js, "flipCards")
+        self.assertIn("getBoundingClientRect", flip)
+        self.assertIn("animEl(", flip)
+        drop = _fn(js, "dropDrag")
+        self.assertIn("placeDragCard(st)", drop)
+        self.assertIn('if(r&&r.error){toast(r.error);refreshSoon()}', drop)
+        self.assertNotIn("refresh()}).then", drop)
+        settle = _fn(js, "placeDragCard")
+        self.assertIn("box.insertBefore(card,ph)", settle)
+        self.assertIn("duration:DRAG_ANIM", settle)
+        self.assertIn("getBoundingClientRect", settle)
+        # the gap is a real flow element, so followers reflow on drop
+        self.assertIn(".dragph{", PANEL_HTML)
+
+    def test_pin_flips_optimistically_with_pop_and_slide(self):
+        from codex_autoresume.control import PANEL_HTML
+        js = _panel_js()
+        body = _fn(js, "togglePin")
+        self.assertIn("pinPop(btn)", body)
+        self.assertIn("flipCards(", body)
+        self.assertIn("/api/threads/reorder", body)
+        self.assertNotIn("refresh()}).then", body)
+        pop = _fn(js, "pinPop")
+        self.assertIn("scale(.55)", pop)
+        self.assertIn("cubic-bezier(.34,1.56,.64,1)", pop)
+        self.assertIn(".tcard .pinbtn{transition:opacity .15s ease",
+                      PANEL_HTML)
+
+    def test_optimistic_order_matches_the_server_rule(self):
+        if not shutil.which("node"):
+            self.skipTest("node not installed")
+        js = _panel_js()
+        harness = _fn(js, "orderedThreads") + r"""
+var window={__s:{threads:[
+ {id:"a",ui_pin:true,ui_order:20,updated_ms:5},
+ {id:"b",ui_pin:true,ui_order:10,updated_ms:1},
+ {id:"c",ui_pin:true,ui_order:null,updated_ms:9},
+ {id:"d",ui_pin:false,ui_order:null,updated_ms:30},
+ {id:"e",ui_pin:false,ui_order:null,updated_ms:20},
+ {id:"f",ui_pin:false,ui_order:5,updated_ms:2}
+]}};
+console.log(JSON.stringify(orderedThreads().map(function(t){return t.id})));
+"""
+        got = _run_node(harness)
+        self.assertEqual(got, ["b", "a", "c", "f", "d", "e"])

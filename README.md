@@ -76,9 +76,12 @@ Codex Guard does that for you, and it does it the way you would:
   and guarded by the reminder notification; the guard stays on so you can
   decide whether to keep it or switch it off.
 - **Pin and reorder without permanent chrome.** Hover a card header for a pin
-  and a drag grip. Pinned conversations rise above a hairline divider; drag
-  a card across it to pin or unpin in one gesture. Order and pins persist
-  across restarts, and the controls stay invisible until hover.
+  and a drag grip. Drag the card itself: it follows the pointer while the
+  other cards slide aside to open a gap, and it settles into place on drop.
+  Pinned conversations rise above a hairline divider; drag a card across it
+  to pin or unpin in one gesture, with the pin icon popping as it flips.
+  Order and pins persist across restarts, and the controls stay invisible
+  until hover.
 - **Armed after the fact still works.** Enabled the guard after the
   interruption already happened? It adopts the conversation's newest failed
   turn (kind, reset time, original message) on the next heartbeat — never a
