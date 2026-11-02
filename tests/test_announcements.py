@@ -1,5 +1,6 @@
 import json
 import unittest
+import urllib.error
 from unittest import mock
 
 from codex_autoresume import announcements as mod
@@ -158,6 +159,51 @@ class HttpGetTest(unittest.TestCase):
         self.assertEqual(req.get_header("User-agent"), mod.UA)
         self.assertEqual(req.get_header("Accept"), "text/plain")
         self.assertEqual(seen[0][1], 3)
+
+    def test_dead_system_proxy_retries_direct(self):
+        calls = []
+
+        class _Opener:
+            def __init__(self, tag):
+                self.tag = tag
+
+            def open(self, req, timeout=0):
+                calls.append(self.tag)
+                if self.tag == "proxy":
+                    raise urllib.error.URLError(
+                        ConnectionRefusedError(10061, "refused"))
+                return _Resp("ok")
+
+        def _build(*handlers):
+            handler = handlers[0] if handlers else None
+            return _Opener("proxy"
+                           if getattr(handler, "proxies", None)
+                           else "direct")
+
+        with mock.patch.object(mod.urllib.request, "build_opener",
+                               side_effect=_build):
+            with mock.patch("codex_autoresume.ratelimits._wininet_proxy",
+                            return_value="http://127.0.0.1:9"):
+                out = mod._http_get("https://e.test/a", "text/plain", 3)
+        self.assertEqual(out, "ok")
+        self.assertEqual(calls, ["proxy", "direct"])
+
+    def test_http_error_is_not_retried_direct(self):
+        calls = []
+
+        class _Opener:
+            def open(self, req, timeout=0):
+                calls.append(1)
+                raise urllib.error.HTTPError(
+                    req.full_url, 403, "rate limited", {}, None)
+
+        with mock.patch.object(mod.urllib.request, "build_opener",
+                               return_value=_Opener()):
+            with mock.patch("codex_autoresume.ratelimits._wininet_proxy",
+                            return_value="http://127.0.0.1:9"):
+                with self.assertRaises(urllib.error.HTTPError):
+                    mod._http_get("https://e.test/a", "text/plain", 3)
+        self.assertEqual(len(calls), 1)
 
 
 class CodexResetFeedTest(unittest.TestCase):

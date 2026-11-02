@@ -272,6 +272,7 @@ class DaemonUpdateTest(unittest.TestCase):
                             "timeout_sec": 1, **update_cfg}}
         d._update = None
         d._update_at = 0.0
+        d._update_fails = 0
         d._update_started = False
         d._update_last = {"status": "ok", "to": "0.3.49", "at": "x"}
         d._inflight = {}
@@ -304,11 +305,46 @@ class DaemonUpdateTest(unittest.TestCase):
             info = d.update_info(force=True)
         self.assertFalse(info["available"])
         self.assertIn("offline", info["error"])
-        # the failure is cached for check_sec (tick must not refetch)
+        # the failure is cached for the short retry window (tick must not
+        # refetch on every poll)
         with mock.patch.object(updater, "fetch_latest_release",
                                side_effect=AssertionError("refetched")):
             again = d.update_info()
         self.assertEqual(again["error"], info["error"])
+
+    def test_failed_check_retries_soon_and_success_restores_interval(self):
+        from codex_autoresume import __version__ as current
+        d = self._daemon()
+        with mock.patch.object(updater, "fetch_latest_release",
+                               side_effect=OSError("offline")):
+            d.update_info(force=True)
+        self.assertEqual(d._update_fails, 1)
+        self.assertEqual(d._update_retry_delay(), 300.0)
+        # five minutes later it retries, although check_sec is one hour
+        d._update_at = time.monotonic() - 301
+        rel = {"version": current, "tag": "v" + current, "url": "",
+               "published_at": ""}
+        with mock.patch.object(updater, "fetch_latest_release",
+                               return_value=rel) as fetch:
+            info = d.update_info()
+        fetch.assert_called_once()
+        self.assertFalse(info["error"])
+        self.assertEqual(d._update_fails, 0)
+        # after a success the full interval applies again
+        d._update_at = time.monotonic() - 301
+        with mock.patch.object(updater, "fetch_latest_release",
+                               return_value=rel) as fetch:
+            d.update_info()
+        fetch.assert_not_called()
+
+    def test_retry_backoff_grows_to_one_hour(self):
+        d = self._daemon()
+        d._update_fails = 1
+        self.assertEqual(d._update_retry_delay(), 300.0)
+        d._update_fails = 2
+        self.assertEqual(d._update_retry_delay(), 900.0)
+        d._update_fails = 9
+        self.assertEqual(d._update_retry_delay(), 3600.0)
 
     def test_force_bypasses_the_check_interval(self):
         from codex_autoresume import __version__ as current

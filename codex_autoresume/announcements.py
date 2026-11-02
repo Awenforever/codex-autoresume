@@ -24,10 +24,14 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import re
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+
+log = logging.getLogger(__name__)
 
 DEFAULT_URL = "https://opentherank.com/codex-reset"
 CODEX_RESET_URL = "https://codex-reset.com/api/feed"
@@ -178,22 +182,39 @@ def _http_get(url: str, accept: str, timeout: float,
     urllib's process-global opener caches the system proxy on first use, so
     when the local proxy app rotates its port every later fetch would keep
     dialing the dead port. Build the opener per request instead.
+
+    When the system proxy refuses the connection (the proxy app is not
+    running, or has not finished starting at logon), retry once without it:
+    a stale WinINET proxy must not hide releases or the news feeds.
     """
     req = urllib.request.Request(
         url, headers={"User-Agent": UA, "Accept": accept})
+
+    def _fetch(opener) -> str:
+        with opener.open(req, timeout=timeout) as resp:
+            return resp.read(limit).decode("utf-8", errors="replace")
+
     proxy = None
     try:
         from .ratelimits import _wininet_proxy
         proxy = _wininet_proxy()
     except Exception:
         proxy = None
-    if proxy:
-        opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
-    else:
-        opener = urllib.request.build_opener()
-    with opener.open(req, timeout=timeout) as resp:
-        return resp.read(limit).decode("utf-8", errors="replace")
+    if not proxy:
+        return _fetch(urllib.request.build_opener())
+    try:
+        return _fetch(urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy, "https": proxy})))
+    except urllib.error.HTTPError:
+        raise
+    except urllib.error.URLError as e:
+        log.warning("system proxy %s failed (%s); retrying directly",
+                    proxy, e)
+        try:
+            return _fetch(urllib.request.build_opener(
+                urllib.request.ProxyHandler({})))
+        except Exception:
+            raise e
 
 
 def parse_full_utc(text: str) -> datetime | None:

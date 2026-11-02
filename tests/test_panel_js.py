@@ -515,8 +515,58 @@ class PanelUpdateUiTest(unittest.TestCase):
         from codex_autoresume.control import PANEL_HTML
         for key in ("updTitle", "updNote", "updGo", "updRestarting",
                     "updFailed", "updSlow", "logoTip", "updChecking",
-                    "updCurrent", "updFound", "updCheckFail", "updOff"):
+                    "updCurrent", "updFound", "updCheckFail", "updOff",
+                    "updCheckFailTip"):
             self.assertEqual(PANEL_HTML.count(key + ':'), 2, key)
+
+    def test_failed_check_and_blocked_update_are_visible(self):
+        from codex_autoresume.control import PANEL_HTML
+        # the dot reflects any known update, even when preflight refuses
+        self.assertIn(
+            "var avail=!!(u&&u.available&&!u.in_progress);", PANEL_HTML)
+        self.assertIn('wrap.classList.toggle("upd",avail)', PANEL_HTML)
+        self.assertNotIn(
+            "var show=!!(u&&u.available&&u.can_update", PANEL_HTML)
+        self.assertIn('L("updCheckFailTip")', PANEL_HTML)
+
+    def test_tooltip_reports_failure_and_blocked_reason(self):
+        if not shutil.which("node"):
+            self.skipTest("node not installed")
+        js = _panel_js()
+        harness = _fn(js, "syncUpdateUi") + r"""
+var got={};
+function L(k){return k+":"}
+var window={};
+var els={};
+function getEl(id){
+ if(!els[id]){
+  var e={};
+  Object.defineProperty(e,"title",{
+   get:function(){return got.title},
+   set:function(v){got.title=v}});
+  e.classList={toggle:function(c,v){got.upd=v}};
+  els[id]=e}
+ return els[id]}
+var document={getElementById:getEl};
+syncUpdateUi({update:{available:false,can_update:false,in_progress:false,
+  error:"offline"}});
+var fail={title:got.title,upd:got.upd};
+syncUpdateUi({update:{available:true,can_update:false,in_progress:false,
+  latest:"0.3.62",reason:"dirty checkout"}});
+var blocked={title:got.title,upd:got.upd};
+syncUpdateUi({update:{available:true,can_update:true,in_progress:false,
+  latest:"0.3.62",reason:""}});
+var ok={title:got.title,upd:got.upd};
+console.log(JSON.stringify({fail:fail,blocked:blocked,ok:ok}));
+"""
+        got = _run_node(harness)
+        self.assertEqual(
+            got["fail"], {"title": "updCheckFailTip:", "upd": False})
+        self.assertEqual(
+            got["blocked"],
+            {"title": "updTip:0.3.62 · dirty checkout", "upd": True})
+        self.assertEqual(
+            got["ok"], {"title": "updTip:0.3.62", "upd": True})
 
 
 class PanelDropdownTest(unittest.TestCase):

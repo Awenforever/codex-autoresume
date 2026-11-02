@@ -81,6 +81,7 @@ class Daemon:
         self._announcement_at: float = 0.0
         self._update: dict | None = None
         self._update_at: float = 0.0
+        self._update_fails: int = 0
         self._update_last = updater.read_last(self.state_dir)
         self._update_started = False
         self._exit_after: float | None = None
@@ -531,19 +532,32 @@ class Daemon:
         out["last"] = self._update_last
         return out
 
+    # a failed check is retried soon (network/proxy may not be up yet at
+    # logon); only a successful check earns the full check_sec interval
+    UPDATE_RETRY_SEC = (300.0, 900.0, 3600.0)
+
+    def _update_retry_delay(self) -> float:
+        n = max(1, self._update_fails)
+        return self.UPDATE_RETRY_SEC[
+            min(n - 1, len(self.UPDATE_RETRY_SEC) - 1)]
+
     def update_info(self, force: bool = False) -> dict:
         """Latest-release check (cached for ``[update].check_sec``)."""
         ucfg = self.cfg.get("update") or {}
         if ucfg.get("enabled") is False:
+            self._update_fails = 0
             self._update = {"enabled": False, "current": __version__,
                             "latest": None, "available": False,
                             "can_update": False,
                             "reason": "update checks are disabled"}
             return self.cached_update()
         refresh = float(ucfg.get("check_sec", 86400) or 86400)
-        if (not force and self._update is not None
-                and time.monotonic() - self._update_at < refresh):
-            return self.cached_update()
+        if not force and self._update is not None:
+            wait = refresh
+            if self._update.get("error"):
+                wait = min(refresh, self._update_retry_delay())
+            if time.monotonic() - self._update_at < wait:
+                return self.cached_update()
         info: dict = {"enabled": True, "current": __version__,
                       "latest": None, "tag": None, "url": "",
                       "published_at": "", "available": False,
@@ -566,10 +580,13 @@ class Daemon:
                 log.info("update available: %s (current %s)%s",
                          rel["version"], __version__,
                          "" if ok else " -- cannot update: " + reason)
+            self._update_fails = 0
         except Exception as e:
-            # network/proxy hiccups are not fatal; retry next interval
+            # network/proxy hiccups are not fatal; retry soon, then back off
             info["error"] = str(e)[:300]
-            log.warning("update check failed: %s", e)
+            self._update_fails += 1
+            log.warning("update check failed (retry in %ds): %s",
+                        int(self._update_retry_delay()), e)
         self._update = info
         self._update_at = time.monotonic()
         return self.cached_update()

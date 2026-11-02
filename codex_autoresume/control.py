@@ -471,7 +471,7 @@ errConn:"无法连接守护进程：",errTimeout:"请求超时（8 秒无响应�
 errHint:"。面板每 15 秒自动重试；若持续失败，请确认守护进程在运行：",
 upd:"已更新",restored:"已恢复默认指令",pauseOK:"守护已暂停",resumeOK:"守护已恢复",
 updTitle:"发现新版本",updTip:"可升级到 v",updNote:"守护进程会自动更新代码并重启；正在进行的对话和额度不受影响。面板会自动重新连接。",updCancel:"稍后",updGo:"更新并重启",updStarting:"正在准备升级…",updRestarting:"正在升级并重启守护进程，面板会自动重新连接…",updFailed:"升级未能启动：",updLastFail:"上次升级未完成：",updSlow:"升级耗时较长——请查看 update.log，或手动重启守护进程。",
-logoTip:"检查更新",updChecking:"正在检查更新…",updCurrent:"已是最新版本 v",updFound:"发现新版本 v",updCheckFail:"检查更新失败：",updOff:"更新检查已关闭",
+logoTip:"检查更新",updChecking:"正在检查更新…",updCurrent:"已是最新版本 v",updFound:"发现新版本 v",updCheckFail:"检查更新失败：",updCheckFailTip:"更新检查失败，点击重试",updOff:"更新检查已关闭",
 footer:"打开方式：侧栏输入 <code>http://127.0.0.1:8765</code>（推荐，不消耗额度）· 桌面快捷方式 · 完整说明见插件 README"},
 en:{title:"Codex Guard",sub:"Auto-continue conversations after quota resets",
 langTip:"Language: English (click to switch)",loading:"Loading…",theme:"Theme",themeAuto:"Follow system",themeLight:"Light",themeDark:"Dark",w5:"5h window",wk:"Weekly",reset:"Resets",
@@ -501,7 +501,7 @@ errHint:". The panel retries every 15s; if this persists, start the daemon: ",
 upd:"Saved",restored:"Prompt reset to default",pauseOK:"Paused all",
 resumeOK:"Resumed all",
 updTitle:"Update available",updTip:"Update available: v",updNote:"The guard will update its code and restart. Conversations and quota are unaffected; this panel reconnects automatically.",updCancel:"Later",updGo:"Update & restart",updStarting:"Preparing update…",updRestarting:"Updating and restarting the guard; this panel reconnects automatically…",updFailed:"Update could not start: ",updLastFail:"Last update did not finish: ",updSlow:"This is taking longer than usual — check update.log or restart the daemon manually.",
-logoTip:"Check for updates",updChecking:"Checking for updates…",updCurrent:"Up to date: v",updFound:"New version available: v",updCheckFail:"Update check failed: ",updOff:"Update checks are disabled",
+logoTip:"Check for updates",updChecking:"Checking for updates…",updCurrent:"Up to date: v",updFound:"New version available: v",updCheckFail:"Update check failed: ",updCheckFailTip:"Update check failed — click to retry",updOff:"Update checks are disabled",
 footer:"Open: type <code>http://127.0.0.1:8765</code> in the sidebar (recommended, no quota cost) · desktop shortcut · full docs in the plugin README"}};
 function L(k){var d=I18N[LNG]||I18N.zh;var v=d[k];
 return (v===undefined)?(I18N.zh[k]||k):v}
@@ -756,9 +756,16 @@ function syncUpdateUi(s){
  var u=(s&&s.update)||null;
  var wrap=document.getElementById("logoWrap");
  var b=document.getElementById("logoBtn");
- var show=!!(u&&u.available&&u.can_update&&!u.in_progress);
- if(wrap){wrap.classList.toggle("upd",show)}
- if(b){b.title=show?(L("updTip")+u.latest):L("logoTip")}
+ var avail=!!(u&&u.available&&!u.in_progress);
+ if(wrap){wrap.classList.toggle("upd",avail)}
+ if(b){
+  var tip=L("logoTip");
+  if(avail){
+   tip=L("updTip")+u.latest;
+   if(!u.can_update&&u.reason){tip+=" · "+u.reason}
+  }else if(u&&u.error){tip=L("updCheckFailTip")}
+  b.title=tip;
+ }
  if(!window.__updating)return;
  var last=u&&u.last;
  if(u&&!u.in_progress&&(!u.available||
