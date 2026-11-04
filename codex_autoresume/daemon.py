@@ -204,6 +204,18 @@ class Daemon:
                     interval = min(interval, max(5.0, (wake - now).total_seconds() + 2))
         return interval
 
+    def _refresh_codex_bin(self) -> None:
+        """Re-resolve codex when an app update removed its bin/<hash> path."""
+        if os.path.isfile(self.codex_bin):
+            return
+        try:
+            found = find_codex_bin(self.cfg["general"]["codex_bin"])
+        except CodexEnvError:
+            return
+        if found != self.codex_bin:
+            log.info("codex binary moved: %s -> %s", self.codex_bin, found)
+            self.codex_bin = found
+
     # ------------------------------------------------------------- one tick
 
     def tick(self) -> None:
@@ -216,6 +228,7 @@ class Daemon:
         if self.state.paused:
             log.debug("paused; skipping tick")
             return
+        self._refresh_codex_bin()
 
         codex = CodexState(self.codex_home)
         events = detect(codex, self.state.seen_sources,
