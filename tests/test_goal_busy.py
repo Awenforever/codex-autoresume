@@ -94,6 +94,32 @@ class GoalResumeBusyHandlingTest(unittest.TestCase):
         self.assertEqual(errors, [])
 
 
+class GoalResumePhaseTest(unittest.TestCase):
+    def test_success_marks_running_phase_immediately(self):
+        tmp = tempfile.mkdtemp(prefix="cxr-phase-")
+        d = object.__new__(dm.Daemon)
+        d.cfg = load_config(None)
+        d.codex_home = tmp
+        d.codex_bin = "codex.exe"
+        d.state = WatcherState(state_path=os.path.join(tmp, "state.json"))
+        t = d.state.thread("g1")
+        t.is_goal = True
+        t.tracked = True
+        t.last_kind = "usage_weekly"
+        t.phase = "waiting"
+        t.phase_reason = "quota"
+        decision = mock.Mock(model=None, reasoning_effort=None)
+
+        with mock.patch.object(ce, "CodexState", _GoalsUsageLimited), \
+             mock.patch.object(rl, "goal_continue",
+                               return_value={"goal": {"status": "active"}}):
+            self.assertTrue(d._goal_resume("g1", t, decision))
+
+        self.assertEqual((t.phase, t.phase_reason), ("running", "goal"))
+        self.assertEqual(t.last_kind, "")
+        self.assertEqual(t.success_resumes, 1)
+
+
 class GoalRetryBackoffCapTest(unittest.TestCase):
     """Writer contention / RPC failures retry within the 3-minute ceiling."""
 

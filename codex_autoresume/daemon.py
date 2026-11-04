@@ -608,6 +608,15 @@ class Daemon:
             return
         t.delivered_turn_id = lt.turn_id
 
+    @staticmethod
+    def _set_phase(t, phase: str, reason: str = "",
+                   turn_id: str | None = None) -> None:
+        """Flip the panel phase now instead of waiting for the next tick."""
+        t.phase = phase
+        t.phase_reason = reason
+        t.phase_at = _now().isoformat(timespec="seconds")
+        t.phase_turn_id = turn_id
+
     def _phase_of(self, thread_id: str, t, goal_status, lt, busy):
         if not (t.tracked or t.manual):
             if t.phase == "stopped":
@@ -622,30 +631,33 @@ class Daemon:
         if (t.phase == "completed" and goal_status is None
                 and (lt is None or lt.turn_id == t.phase_turn_id)):
             return "completed", "goal"
+        if goal_status == "paused":
+            return "paused", "goal"
+        # live evidence outranks a stale waiting state: the app may still
+        # report usage_limited while it runs the resumed turn under a
+        # chained rollout id, and the guard's own resume is in flight while
+        # the interruption is still on record
+        with self._inflight_lock:
+            inflight = thread_id in self._inflight
+        if inflight:
+            return "running", "resume"
+        if thread_id in busy:
+            return "running", ("goal" if (goal_status is not None or t.is_goal)
+                               else "")
         if goal_status in ("usage_limited", "budget_limited", "blocked"):
             if goal_status == "budget_limited":
                 return "waiting", "budget"
             if goal_status == "blocked":
                 return "waiting", "blocked"
             return "waiting", "quota"
-        if goal_status == "paused":
-            return "paused", "goal"
-        with self._inflight_lock:
-            inflight = thread_id in self._inflight
-        if inflight:
-            return "running", "resume"
         if t.last_kind:
             if t.last_kind == "server_overloaded":
                 return "waiting", "capacity"
             return "waiting", "quota"
         if goal_status is not None:
-            if thread_id in busy:
-                return "running", "goal"
             if lt is not None and lt.status == "completed":
                 return "stage", "goal"
             return "watching", ""
-        if thread_id in busy:
-            return "running", ""
         if (t.delivered_turn_id is not None and lt is not None
                 and lt.turn_id == t.delivered_turn_id
                 and lt.status == "completed"):
@@ -1998,6 +2010,7 @@ class Daemon:
                 t.last_kind = ""      # handed back to the goal engine
             t.next_wake_iso = None
             getattr(self, "_goal_busy_backoff", {}).pop(thread_id, None)
+            self._set_phase(t, "running", "goal")
             log.info("goal %s continued via thread/goal/set (status=%s, "
                      "model=%s effort=%s)", thread_id[:8], new_status,
                      decision.model, decision.reasoning_effort)
@@ -2090,6 +2103,7 @@ class Daemon:
                 t.last_kind = ""
             t.next_wake_iso = None
             getattr(self, "_goal_busy_backoff", {}).pop(thread_id, None)
+            self._set_phase(t, "running", "goal")
             log.info("goal %s resumed via the app's own Continue button (%s)",
                      thread_id[:8], res.get("detail"))
             self._notify(thread_id, "uia_continue")
@@ -2118,6 +2132,17 @@ class Daemon:
             t.last_kind = ""            # interruption handled
             t.last_reset_at = None
             t.next_wake_iso = None
+            try:
+                from .codexenv import CodexState
+                lt = CodexState(self.codex_home).latest_turn(thread_id)
+            except Exception:
+                lt = None
+            self._note_delivery(t, lt, None)
+            if (t.delivered_turn_id is not None and lt is not None
+                    and lt.turn_id == t.delivered_turn_id):
+                self._set_phase(t, "delivered", "", lt.turn_id)
+            else:
+                self._set_phase(t, "watching", "")
             log.info("resume %s -> success (%.0fs)", thread_id[:8],
                      outcome.duration_sec)
         else:

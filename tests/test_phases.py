@@ -143,6 +143,54 @@ class TestInterruptionPhases(unittest.TestCase):
         self.assertEqual((t.phase, t.phase_reason), ("paused", "all"))
 
 
+class TestLivePhasePrecedence(unittest.TestCase):
+    def test_live_turn_wins_over_a_limited_goal_row(self):
+        home = build_codex_home(
+            tempfile.mkdtemp(prefix="cxr-ph-"),
+            turns=[("g1", "turn-1", "inProgress", None, NOW - 10, None)],
+            goals=[_goal_row("g1", "usage_limited")])
+        d = _daemon(home)
+        t = d.state.thread("g1")
+        t.tracked = True
+        t.is_goal = True
+        _refresh(d, busy={"g1"})
+        self.assertEqual((t.phase, t.phase_reason), ("running", "goal"))
+
+    def test_inflight_resume_wins_over_the_interruption_record(self):
+        home = build_codex_home(
+            tempfile.mkdtemp(prefix="cxr-ph-"), turns=[],
+            goals=[_goal_row("g1", "usage_limited")])
+        d = _daemon(home)
+        t = d.state.thread("g1")
+        t.tracked = True
+        t.last_kind = "usage_weekly"
+        d._inflight = {"g1"}
+        _refresh(d)
+        self.assertEqual((t.phase, t.phase_reason), ("running", "resume"))
+
+    def test_live_turn_wins_over_last_kind(self):
+        home = build_codex_home(
+            tempfile.mkdtemp(prefix="cxr-ph-"),
+            turns=[("t1", "turn-1", "inProgress", None, NOW - 10, None)])
+        d = _daemon(home)
+        t = d.state.thread("t1")
+        t.tracked = True
+        t.last_kind = "usage_primary"
+        _refresh(d, busy={"t1"})
+        self.assertEqual((t.phase, t.phase_reason), ("running", ""))
+
+    def test_paused_goal_still_wins_over_a_live_turn(self):
+        home = build_codex_home(
+            tempfile.mkdtemp(prefix="cxr-ph-"),
+            turns=[("g1", "turn-1", "inProgress", None, NOW - 10, None)],
+            goals=[_goal_row("g1", "paused")])
+        d = _daemon(home)
+        t = d.state.thread("g1")
+        t.tracked = True
+        _refresh(d, busy={"g1"})
+        self.assertEqual((t.phase, t.phase_reason), ("paused", "goal"))
+
+
 class TestCompletionPhases(unittest.TestCase):
     def test_goal_complete_is_the_flip(self):
         home = build_codex_home(tempfile.mkdtemp(prefix="cxr-ph-"), turns=[
@@ -242,6 +290,21 @@ class TestDeliveryPhases(unittest.TestCase):
         d._refresh_phases(CodexState(home).latest_turns(), {},
                           set(), datetime.now().astimezone())
         self.assertEqual(t.phase, "watching")
+
+    def test_exec_success_flips_the_phase_immediately(self):
+        from codex_autoresume.resume import ResumeOutcome
+        home = build_codex_home(tempfile.mkdtemp(prefix="cxr-ph-"), turns=[
+            ("t1", "turn-1", "failed",
+             err_payload("usageLimitExceeded", "limit"), NOW - 120, NOW - 90),
+            ("t1", "turn-2", "completed", None, NOW - 60, NOW - 30)])
+        _add_final_item(home, "t1", "turn-2")
+        d, t = self._resumed(home)
+        t.phase, t.phase_reason = "waiting", "quota"
+        t.last_kind = "usage_primary"
+        d._record("t1", ResumeOutcome(
+            ok=True, kind="continued", exit_code=0, duration_sec=3.0), None)
+        self.assertEqual((t.phase, t.phase_reason), ("delivered", ""))
+        self.assertEqual(t.delivered_turn_id, "turn-2")
 
     def test_completed_without_floor_is_not_delivered(self):
         home = build_codex_home(tempfile.mkdtemp(prefix="cxr-ph-"), turns=[

@@ -262,8 +262,13 @@ class CodexState:
         so a live turn additionally requires recent thread activity: a new
         thread_item written within *item_fresh_sec*. Threads whose turn only
         started recently (no items yet) also count as busy.
+
+        Chained rollouts record the continued turn under the new id; fold
+        those onto the canonical threads-table id so a guarded conversation
+        is recognized while the app runs it.
         """
         import time as _time
+        aliases = self.rollout_alias_map()
         con = _connect_ro(self._history_db)
         try:
             now_ms = _time.time() * 1000
@@ -274,11 +279,13 @@ class CodexState:
                 "FROM thread_turns t WHERE t.status = 'inProgress'")
             busy: set[str] = set()
             for thread_id, started_at, last_item_ms in rows:
+                live = False
                 if last_item_ms:
-                    if now_ms - last_item_ms <= item_fresh_sec * 1000:
-                        busy.add(thread_id)
-                elif started_at and now_ms - started_at * 1000 <= 4 * 3600 * 1000:
-                    busy.add(thread_id)
+                    live = now_ms - last_item_ms <= item_fresh_sec * 1000
+                elif started_at:
+                    live = now_ms - started_at * 1000 <= 4 * 3600 * 1000
+                if live:
+                    busy.add(aliases.get(thread_id.lower(), thread_id))
             return busy
         finally:
             con.close()

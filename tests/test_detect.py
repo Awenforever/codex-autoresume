@@ -178,6 +178,20 @@ class TestDetect(unittest.TestCase):
         from codex_autoresume.codexenv import CodexState
         state = CodexState(self.home)
         self.assertEqual(state.busy_threads(), {"t-busy"})
+
+    def test_busy_threads_fold_chained_rollout_ids(self):
+        import time as _time
+        now = int(_time.time())
+        root = tempfile.mkdtemp(prefix="cxr-detect-")
+        home = build_codex_home(root, turns=[
+            ("01a12031-439c-7400-b550-891b01130506", "turn-9",
+             "inProgress", None, now - 10, None)],
+            threads=[("t-primary", "r.jsonl", 1, 1, "user", "openai", "/w",
+                      "title", "read-only", "never", 0, 1, 0, "m", "low",
+                      int(_time.time() * 1000), "n1")])
+        from codex_autoresume.codexenv import CodexState
+        self.assertEqual(CodexState(home).busy_threads(), {"t-primary"})
+
     def test_thread_lookup(self):
         from codex_autoresume.codexenv import CodexState
         state = CodexState(self.home)
