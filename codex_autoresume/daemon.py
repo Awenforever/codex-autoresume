@@ -58,6 +58,19 @@ def _today(now: datetime | None = None) -> str:
     return (now or _now()).strftime("%Y-%m-%d")
 
 
+def _is_spawn_error(e: BaseException) -> bool:
+    """True when the codex app-server child could not be started at all."""
+    return (isinstance(e, FileNotFoundError)
+            or (isinstance(e, OSError)
+                and (getattr(e, "winerror", None) in (2, 3)
+                     or getattr(e, "errno", None) == 2)))
+
+
+def _spawn_error_tail(text: str) -> bool:
+    return ("WinError 2" in text or "WinError 3" in text
+            or "FileNotFoundError" in text)
+
+
 class Daemon:
     def __init__(self, cfg: dict):
         self.cfg = cfg
@@ -130,6 +143,7 @@ class Daemon:
         try:
             self.state = load_state(self.state_path)
             self._sync_external_edits(force=True)
+            self._repair_spawn_failure_budget()
             control = None
             if self.cfg["control_api"]["enabled"]:
                 from .control import ControlApi
@@ -215,6 +229,37 @@ class Daemon:
         if found != self.codex_bin:
             log.info("codex binary moved: %s -> %s", self.codex_bin, found)
             self.codex_bin = found
+
+    def _repair_spawn_failure_budget(self) -> None:
+        """Undo resume budgets burned by app-server spawn errors.
+
+        Older versions counted a missing codex executable as a thread
+        failure; six of those parked the conversation for good.
+        """
+        repaired = False
+        for tid, t in self.state.threads.items():
+            counters = []
+            if t.last_error == "goal_continue" and t.fail_streak > 0:
+                counters.append(("fail_streak", "goal_continue_error",
+                                 t.fail_streak))
+            if t.last_error == "continue_error" and t.continue_fails > 0:
+                counters.append(("continue_fails", "continue_error",
+                                 t.continue_fails))
+            for attr, kind, count in counters:
+                fails = [h for h in t.history if h.get("kind") == kind][-count:]
+                if len(fails) < count:
+                    continue
+                if not all(h.get("spawn_error")
+                           or _spawn_error_tail(str(h.get("error_tail") or ""))
+                           for h in fails):
+                    continue
+                setattr(t, attr, 0)
+                t.next_wake_iso = None
+                repaired = True
+                log.info("reset %s on %s: past failures were spawn errors",
+                         attr, tid[:8])
+        if repaired:
+            save_state(self.state)
 
     # ------------------------------------------------------------- one tick
 
@@ -1683,15 +1728,25 @@ class Daemon:
                     # window evidence and backoff stay consistent
                     self._record(thread_id, outcome, None)
                 else:
-                    t.continue_fails += 1
+                    spawn = _is_spawn_error(e)
+                    if not spawn:
+                        t.continue_fails += 1
                     t.last_error = "continue_error"
-                    t.append_history({"at": _now().isoformat(),
-                                      "kind": "continue_error", "ok": False,
-                                      "error_tail": str(e)[:400]})
+                    entry = {"at": _now().isoformat(),
+                             "kind": "continue_error", "ok": False,
+                             "error_tail": str(e)[:400]}
+                    if spawn:
+                        entry["spawn_error"] = True
+                    t.append_history(entry)
                     t.next_wake_iso = (_now() + timedelta(
                         seconds=RETRY_BACKOFF_CAP_SEC)).isoformat()
-                    log.warning("continue %s failed (%s); retrying in 3 min",
-                                thread_id[:8], e)
+                    if spawn:
+                        log.warning("continue %s could not spawn codex "
+                                    "(%s); not counted as a thread failure, "
+                                    "retrying in 3 min", thread_id[:8], e)
+                    else:
+                        log.warning("continue %s failed (%s); retrying in "
+                                    "3 min", thread_id[:8], e)
                     save_state(self.state)
                 return
             self._record(thread_id, ResumeOutcome(ok=True, kind="continued",
@@ -1970,16 +2025,26 @@ class Daemon:
             save_state(self.state)
             return True
         except (RateLimitError, OSError) as e:
-            t.fail_streak += 1
+            spawn = _is_spawn_error(e)
+            if not spawn:
+                t.fail_streak += 1
             t.last_error = "goal_continue"
-            t.append_history({"at": _now().isoformat(),
-                              "kind": "goal_continue_error", "ok": False,
-                              "error_tail": str(e)[:400]})
+            entry = {"at": _now().isoformat(),
+                     "kind": "goal_continue_error", "ok": False,
+                     "error_tail": str(e)[:400]}
+            if spawn:
+                entry["spawn_error"] = True
+            t.append_history(entry)
             t.next_wake_iso = (_now() + timedelta(
                 seconds=RETRY_BACKOFF_CAP_SEC)).isoformat()
-            log.warning("goal continue %s failed (%s); NO message fallback "
-                        "for goal threads, retrying in 3 min",
-                        thread_id[:8], e)
+            if spawn:
+                log.warning("goal continue %s could not spawn codex (%s); "
+                            "not counted as a thread failure, retrying in "
+                            "3 min", thread_id[:8], e)
+            else:
+                log.warning("goal continue %s failed (%s); NO message "
+                            "fallback for goal threads, retrying in 3 min",
+                            thread_id[:8], e)
             save_state(self.state)
             return True   # handled: caller must not fall back to exec/queue
 
