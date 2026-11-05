@@ -42,6 +42,10 @@ WIN_APP_GLOBS = [
 _UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
                       re.IGNORECASE)
 
+# the daemon runs under pythonw (no console); a bare codex.exe probe would
+# open a console window every time the binary is re-checked
+CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
 
 class CodexEnvError(Exception):
     pass
@@ -71,7 +75,8 @@ def find_codex_bin(cfg_codex_bin: str = "") -> str:
 def codex_version(codex_bin: str) -> str:
     try:
         out = subprocess.run([codex_bin, "--version"], capture_output=True,
-                             text=True, timeout=30)
+                             text=True, timeout=30,
+                             creationflags=CREATE_NO_WINDOW)
         return (out.stdout or out.stderr).strip()
     except Exception as e:  # pragma: no cover - environment dependent
         return "unknown: %s" % e

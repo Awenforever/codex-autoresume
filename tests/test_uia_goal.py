@@ -34,6 +34,9 @@ class UAIGoalContinueTest(unittest.TestCase):
         self.t = self.d.state.thread("g1")
         self.t.is_goal = True
         self.t.tracked = True
+        patcher = mock.patch.object(dm.Daemon, "_play_sound")
+        self.play_sound = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_click_flips_status_counts_success(self):
         goals = _Goals([("g1", "usage_limited")])
@@ -56,6 +59,8 @@ class UAIGoalContinueTest(unittest.TestCase):
         self.assertEqual(self.t.last_outcome, "uia_continue")
         self.assertEqual(self.t.fail_streak, 0)
         self.assertEqual(self.t.history[-1]["kind"], "uia_continue")
+        self.assertIsNotNone(self.t.resume_ok_until)
+        self.play_sound.assert_called_once_with("resume")
 
     def test_ambiguous_goals_skip_click(self):
         goals = _Goals([("g1", "usage_limited"), ("g2", "usage_limited")])
@@ -91,6 +96,24 @@ class UAIGoalContinueTest(unittest.TestCase):
             ok = self.d._uia_goal_continue("g1", self.t)
         self.assertFalse(ok)
         click.assert_not_called()
+
+
+class SilentSpawnTest(unittest.TestCase):
+    def test_uia_powershell_never_opens_a_console(self):
+        completed = mock.Mock(stdout=b"[]")
+        with mock.patch.object(uia.subprocess, "run",
+                               return_value=completed) as run:
+            uia._run_ps("$null")
+        self.assertEqual(run.call_args.kwargs["creationflags"],
+                         uia.CREATE_NO_WINDOW)
+
+    def test_codex_version_probe_never_opens_a_console(self):
+        completed = mock.Mock(stdout="codex 1.0", stderr="")
+        with mock.patch.object(ce.subprocess, "run",
+                               return_value=completed) as run:
+            ce.codex_version("codex.exe")
+        self.assertEqual(run.call_args.kwargs["creationflags"],
+                         ce.CREATE_NO_WINDOW)
 
 
 if __name__ == "__main__":

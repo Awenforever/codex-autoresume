@@ -15,7 +15,12 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
+
+# pythonw has no console of its own; spawning powershell without this flag
+# flashes a console window at the user on every resume click
+CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 # candidate accessible names for the goal bar's continue control.
 # "Resume goal" is the app's own prompt button shown when a quota window
@@ -62,7 +67,8 @@ $res | ConvertTo-Json -Compress -Depth 3
 def _run_ps(script: str, timeout: int = 60) -> str:
     enc = base64.b64encode(script.encode("utf-16-le")).decode()
     r = subprocess.run(["powershell", "-NoProfile", "-EncodedCommand", enc],
-                       capture_output=True, timeout=timeout)
+                       capture_output=True, timeout=timeout,
+                       creationflags=CREATE_NO_WINDOW)
     return (r.stdout or b"").decode("utf-8", "replace").strip()
 
 

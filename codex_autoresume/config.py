@@ -103,6 +103,20 @@ DEFAULTS: dict[str, Any] = {
         # interrupted days ago was finished by the user, not paused
         # (0 disables the cap)
         "stopped_continue_max_age_hours": 24,
+        # after a confirmed resume the app needs a moment to write the live
+        # turn and flip the goal row; keep showing "running" that long
+        # instead of flapping back to "waiting" (0 disables the grace)
+        "resume_grace_sec": 120,
+    },
+    # Windows notification sounds (no-op on other platforms). ``interrupt``
+    # fires when quota exhaustion interrupts a guarded thread, ``resume``
+    # when the guard successfully resumes/continues one. Values are Windows
+    # system-sound aliases (default/asterisk/exclamation/question/hand) or a
+    # path to a .wav file; "" disables one event.
+    "sound": {
+        "enabled": True,
+        "interrupt": "exclamation",
+        "resume": "asterisk",
     },
     "resume": {
         # "exec"  -> codex exec resume <id> "<prompt>" (supports model overrides)

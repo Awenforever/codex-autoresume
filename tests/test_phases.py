@@ -17,7 +17,7 @@ import tempfile
 import threading
 import time
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from codex_autoresume.codexenv import CodexState
 from codex_autoresume.config import (
@@ -191,6 +191,50 @@ class TestLivePhasePrecedence(unittest.TestCase):
         self.assertEqual((t.phase, t.phase_reason), ("paused", "goal"))
 
 
+class TestResumeGrace(unittest.TestCase):
+    def _goal(self, status="usage_limited"):
+        home = build_codex_home(
+            tempfile.mkdtemp(prefix="cxr-ph-"), turns=[],
+            goals=[_goal_row("g1", status)])
+        d = _daemon(home)
+        t = d.state.thread("g1")
+        t.tracked = True
+        t.is_goal = True
+        return d, t
+
+    def test_just_resumed_goal_stays_running_while_the_row_is_stale(self):
+        d, t = self._goal()
+        d._mark_resume_ok(t)
+        _refresh(d)
+        self.assertEqual((t.phase, t.phase_reason), ("running", "goal"))
+
+    def test_grace_expires_back_to_waiting(self):
+        d, t = self._goal()
+        t.resume_ok_until = (datetime.now().astimezone()
+                             - timedelta(seconds=1)).isoformat()
+        _refresh(d)
+        self.assertEqual((t.phase, t.phase_reason), ("waiting", "quota"))
+
+    def test_fresh_interruption_wins_over_grace(self):
+        d, t = self._goal()
+        d._mark_resume_ok(t)
+        t.last_kind = "usage_weekly"
+        _refresh(d)
+        self.assertEqual((t.phase, t.phase_reason), ("waiting", "quota"))
+
+    def test_blocked_goal_wins_over_grace(self):
+        d, t = self._goal("blocked")
+        d._mark_resume_ok(t)
+        _refresh(d)
+        self.assertEqual((t.phase, t.phase_reason), ("waiting", "blocked"))
+
+    def test_zero_grace_disables_the_window(self):
+        d, t = self._goal()
+        d.cfg["general"]["resume_grace_sec"] = 0
+        d._mark_resume_ok(t)
+        self.assertIsNone(t.resume_ok_until)
+
+
 class TestCompletionPhases(unittest.TestCase):
     def test_goal_complete_is_the_flip(self):
         home = build_codex_home(tempfile.mkdtemp(prefix="cxr-ph-"), turns=[
@@ -354,11 +398,13 @@ class TestPhaseLifecycle(unittest.TestCase):
         t.delivered_turn_id = "x"
         t.resume_floor_turn_id = "y"
         t.resume_floor_open = True
+        t.resume_ok_until = "2099-01-01T00:00:00"
         arm_thread(t)
         self.assertEqual(t.phase, "watching")
         self.assertIsNone(t.delivered_turn_id)
         self.assertIsNone(t.resume_floor_turn_id)
         self.assertFalse(t.resume_floor_open)
+        self.assertIsNone(t.resume_ok_until)
 
     def test_guard_off_clears_phase_but_keeps_stopped_visible(self):
         home = build_codex_home(tempfile.mkdtemp(prefix="cxr-ph-"), turns=[])

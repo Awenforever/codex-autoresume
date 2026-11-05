@@ -1577,7 +1577,8 @@ function cycleTheme(){setTheme(THEME==="auto"?"light":(THEME==="light"?"dark":"a
 function _themeFollow(){if(THEME!=="auto")return;_themeFade();applyTheme()}
 if(MQL){try{MQL.addEventListener("change",_themeFollow)}catch(e){
 if(MQL.addListener)MQL.addListener(_themeFollow)}}
-applyTheme();applyLang();refresh();setInterval(refresh,15000);
+applyTheme();applyLang();refresh();
+setInterval(function(){if(!document.hidden)refresh()},5000);
 document.addEventListener("visibilitychange",function(){
 if(!document.hidden){refresh()}});
 window.addEventListener("focus",function(){refresh()});

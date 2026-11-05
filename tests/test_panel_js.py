@@ -387,7 +387,9 @@ class PanelHeaderTest(unittest.TestCase):
         self.assertNotIn('id="refreshBtn"', PANEL_HTML)
         self.assertNotIn('L("refresh")', PANEL_HTML)
         self.assertNotIn('refreshed', PANEL_HTML)
-        self.assertIn('setInterval(refresh,15000)', PANEL_HTML)
+        self.assertIn(
+            'setInterval(function(){if(!document.hidden)refresh()},5000)',
+            PANEL_HTML)
 
     def test_english_is_default_language(self):
         from codex_autoresume.control import PANEL_HTML

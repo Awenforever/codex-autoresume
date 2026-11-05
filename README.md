@@ -288,6 +288,12 @@ poll_interval_sec = 50      # daemon heartbeat
 weekly_resume = "off"       # off | per-thread | all
 stopped_continue_sec = 60   # quiet seconds before a stopped turn continues
 stopped_continue_max_age_hours = 24  # older stops are finished work (0 = no cap)
+resume_grace_sec = 120      # keep "running" after a resume until live evidence
+
+[sound]
+enabled = true              # Windows notification sounds
+interrupt = "exclamation"   # quota exhaustion stopped a guarded thread
+resume = "asterisk"         # guard resumed one successfully
 
 [resume]
 mode = "exec"               # "queue" delivers into the desktop app instead
@@ -492,6 +498,12 @@ poll_interval_sec = 50      # 守护心跳
 weekly_resume = "off"       # off | per-thread | all
 stopped_continue_sec = 60   # 「停止」后静默多久再自动继续
 stopped_continue_max_age_hours = 24  # 更早的停止视为已完成（0 = 不限制）
+resume_grace_sec = 120      # 恢复后先保持「运行中」，等实况证据
+
+[sound]
+enabled = true              # Windows 提示音
+interrupt = "exclamation"   # 额度耗尽中止了受守护线程
+resume = "asterisk"         # 守护成功自动恢复
 
 [resume]
 mode = "exec"               # "queue" 表示投递进桌面应用

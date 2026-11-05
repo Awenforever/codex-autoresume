@@ -79,6 +79,10 @@ class ThreadState:
     resume_floor_turn_id: str | None = None
     resume_floor_open: bool = False
     delivered_turn_id: str | None = None
+    # a resume was just confirmed but the app may not have written the live
+    # turn / flipped the goal row yet: keep the panel on "running" until this
+    # time instead of flapping back to "waiting" (ISO; None = no grace)
+    resume_ok_until: str | None = None
     # panel ordering: pinned cards first. ui_order is the last visual rank;
     # ui_order_at marks a manual move and freezes this card's slot for
     # ORDER_HOLD_SECONDS, after which the group follows recency again.
@@ -123,6 +127,7 @@ def arm_thread(t: ThreadState) -> None:
     t.resume_floor_turn_id = None
     t.resume_floor_open = False
     t.delivered_turn_id = None
+    t.resume_ok_until = None
 
 
 @dataclass

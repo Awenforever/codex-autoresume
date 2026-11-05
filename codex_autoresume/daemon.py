@@ -298,6 +298,9 @@ class Daemon:
         # event will ever fire for it. Adopt the newest failed turn as the
         # cause (with its own kind, reset time and message) instead of
         # guessing one.
+        # only first-hand detections may chime; adopted cold-start history
+        # (a failure from before the guard was enabled) must stay silent
+        detected_ids = {id(e) for e in events}
         adopted = self._adopt_armed_failures(latest, goal_threads, now)
         if adopted:
             events.extend(adopted)
@@ -313,6 +316,7 @@ class Daemon:
             key=lambda e: e.occurred_at.timestamp() if e.occurred_at else 0.0)
         goal_event_list = [e for e in events
                            if not e.source.startswith("turn:")]
+        quota_alert = False
         for e in turn_events + goal_event_list:
             t = self.state.thread(e.thread_id)
             if e.source.startswith("turn:"):
@@ -331,6 +335,13 @@ class Daemon:
             if e.reset_at is not None:
                 t.last_reset_at = e.reset_at.isoformat()
             self._maybe_track(t, e)
+            if (id(e) in detected_ids
+                    and e.kind in ("usage_primary", "usage_weekly",
+                                   "goal_limited")
+                    and (t.tracked or t.manual)):
+                quota_alert = True
+        if quota_alert:
+            self._alert_quota_interrupt()
 
         # a newer turn (completed by the user, or stopped) retires the
         # interruption: injecting a prompt now would append an unwanted
@@ -617,6 +628,20 @@ class Daemon:
         t.phase_at = _now().isoformat(timespec="seconds")
         t.phase_turn_id = turn_id
 
+    def _mark_resume_ok(self, t) -> None:
+        grace = float(self.cfg["general"].get("resume_grace_sec", 120) or 0)
+        t.resume_ok_until = ((_now() + timedelta(seconds=grace)).isoformat()
+                             if grace > 0 else None)
+
+    @staticmethod
+    def _resume_grace_active(t) -> bool:
+        if not t.resume_ok_until:
+            return False
+        try:
+            return datetime.fromisoformat(t.resume_ok_until) > _now()
+        except ValueError:
+            return False
+
     def _phase_of(self, thread_id: str, t, goal_status, lt, busy):
         if not (t.tracked or t.manual):
             if t.phase == "stopped":
@@ -642,6 +667,14 @@ class Daemon:
         if inflight:
             return "running", "resume"
         if thread_id in busy:
+            return "running", ("goal" if (goal_status is not None or t.is_goal)
+                               else "")
+        # a just-confirmed resume is live evidence even before the app writes
+        # the new turn or flips the goal row; without this the next tick
+        # flips the panel back to "waiting" for tens of seconds. A fresh
+        # interruption (last_kind re-armed) or an authoritative block wins.
+        if (not t.last_kind and goal_status != "blocked"
+                and self._resume_grace_active(t)):
             return "running", ("goal" if (goal_status is not None or t.is_goal)
                                else "")
         if goal_status in ("usage_limited", "budget_limited", "blocked"):
@@ -1812,8 +1845,11 @@ class Daemon:
             t.continue_fails = 0
             t.fail_streak = 0
             t.next_wake_iso = None
+            self._mark_resume_ok(t)
+            self._set_phase(t, "running", "")
             log.info("%s continued via the app's own Continue button (%s)",
                      thread_id[:8], res.get("detail"))
+            self._play_sound("resume")
             self._notify(thread_id, "uia_continue")
             save_state(self.state)
             return True
@@ -2010,10 +2046,12 @@ class Daemon:
                 t.last_kind = ""      # handed back to the goal engine
             t.next_wake_iso = None
             getattr(self, "_goal_busy_backoff", {}).pop(thread_id, None)
+            self._mark_resume_ok(t)
             self._set_phase(t, "running", "goal")
             log.info("goal %s continued via thread/goal/set (status=%s, "
                      "model=%s effort=%s)", thread_id[:8], new_status,
                      decision.model, decision.reasoning_effort)
+            self._play_sound("resume")
             self._notify(thread_id, "goal_continue")
             save_state(self.state)
             return True
@@ -2103,9 +2141,11 @@ class Daemon:
                 t.last_kind = ""
             t.next_wake_iso = None
             getattr(self, "_goal_busy_backoff", {}).pop(thread_id, None)
+            self._mark_resume_ok(t)
             self._set_phase(t, "running", "goal")
             log.info("goal %s resumed via the app's own Continue button (%s)",
                      thread_id[:8], res.get("detail"))
+            self._play_sound("resume")
             self._notify(thread_id, "uia_continue")
             save_state(self.state)
             return True
@@ -2143,6 +2183,7 @@ class Daemon:
                 self._set_phase(t, "delivered", "", lt.turn_id)
             else:
                 self._set_phase(t, "watching", "")
+            self._play_sound("resume")
             log.info("resume %s -> success (%.0fs)", thread_id[:8],
                      outcome.duration_sec)
         else:
@@ -2201,6 +2242,28 @@ class Daemon:
         self._notify(thread_id, outcome.kind,
                      outcome.stderr_tail or outcome.stdout_tail)
         save_state(self.state)
+
+    def _play_sound(self, kind: str) -> None:
+        snd = self.cfg.get("sound") or {}
+        if not snd.get("enabled", True):
+            return
+        spec = str(snd.get(kind) or "")
+        if not spec:
+            return
+        from .sound import play
+        play(spec)
+
+    def _alert_quota_interrupt(self) -> None:
+        """Chime once per quota interruption burst (several threads can be
+        parked by the same empty window in one tick)."""
+        now = time.monotonic()
+        last = getattr(self, "_sound_last", None)
+        if last is None:
+            last = self._sound_last = {}
+        if now - last.get("interrupt", 0.0) < 120:
+            return
+        last["interrupt"] = now
+        self._play_sound("interrupt")
 
     def _notify(self, thread_id: str, kind: str, detail: str = "") -> None:
         cmd = self.cfg["general"]["notify_command"]

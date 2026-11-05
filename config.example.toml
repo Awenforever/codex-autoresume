@@ -61,6 +61,20 @@ stopped_continue_sec = 60
 # 0 disables the cap.
 stopped_continue_max_age_hours = 24
 
+# After a confirmed resume the app needs a moment to write the live turn and
+# flip the goal row. The panel keeps showing "running" for this long instead
+# of flapping back to "waiting" (0 disables the grace).
+resume_grace_sec = 120
+
+[sound]
+# Windows notification sounds; no-op on macOS/Linux. "interrupt" fires when
+# quota exhaustion stops a guarded thread, "resume" on a successful resume.
+# Values: default | asterisk | exclamation | question | hand, a .wav path,
+# or "" to disable that event.
+enabled = true
+interrupt = "exclamation"
+resume = "asterisk"
+
 [resume]
 # "exec"  -> headless `codex exec resume` (supports model/effort overrides)
 # "queue" -> `codex queue` (delivered inside the desktop app; keeps the
