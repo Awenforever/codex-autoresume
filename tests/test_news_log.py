@@ -48,6 +48,35 @@ class NewsLogTest(unittest.TestCase):
             {"at": at, "text": "no id", "kind": "post"}]})
         self.assertEqual(self.d.state.news_log[0]["key"], at)
 
+    def test_previous_entries_survive_a_partial_sync(self):
+        # one source is down: posts it contributed earlier must stay visible
+        self.d.state.news_log = [
+            {"at": _iso(5), "text": "from the down source",
+             "kind": "post", "key": "w1"}]
+        self.d._log_announcement({"posts": [
+            {"id": "c1", "at": _iso(1), "text": "fresh", "kind": "post"}]})
+        self.assertEqual([e["text"] for e in self.d.state.news_log],
+                         ["from the down source", "fresh"])
+
+    def test_previous_window_is_deduped_against_fresh(self):
+        self.d.state.news_log = [
+            {"at": _iso(5), "text": "same", "kind": "post", "key": "x1"},
+            {"at": _iso(4), "text": "same words", "kind": "post",
+             "key": "at-only"}]
+        self.d._log_announcement({"posts": [
+            {"id": "x1", "at": _iso(5), "text": "same", "kind": "post"},
+            {"id": "y2", "at": _iso(3), "text": "same words",
+             "kind": "post"}]})
+        self.assertEqual([e["key"] for e in self.d.state.news_log],
+                         ["x1", "y2"])
+
+    def test_expired_previous_entries_are_dropped(self):
+        self.d.state.news_log = [
+            {"at": _iso(50), "text": "too old", "kind": "post", "key": "o1"}]
+        self.d._log_announcement({"posts": [
+            {"id": "n1", "at": _iso(1), "text": "new", "kind": "post"}]})
+        self.assertEqual([e["text"] for e in self.d.state.news_log], ["new"])
+
 
 if __name__ == "__main__":
     unittest.main()

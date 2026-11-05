@@ -1361,27 +1361,45 @@ class Daemon:
         return eff
 
     def _log_announcement(self, ann: dict | None) -> None:
-        """Keep news_log as a normalized mirror of the merged timelines.
+        """Maintain a rolling 48h window over the merged timelines.
 
-        The SOURCES are the source of truth: rebuild the log from their
-        posts (last 48h, oldest to newest) on every sync. Entries carry
-        each post's own publication time and X id when known. When no
-        source yields posts, the stored log is left untouched — never
-        append fetch-time entries.
+        Entries carry each post's own publication time and X id when known.
+        Posts seen by an earlier sync stay in the window while still inside
+        48h: a transient source outage must not shrink the visible history,
+        and sources rotate their own timelines. Duplicates are dropped by id
+        and by normalized text (fresh text wins). When no source yields
+        posts, the stored log is left untouched — never append fetch-time
+        entries.
         """
         try:
-            posts = [p for p in ((ann or {}).get("posts") or [])
+            fresh = [p for p in ((ann or {}).get("posts") or [])
                      if _post_age_hours(p.get("at", "")) <= 48]
-            if not posts:
+            if not fresh:
                 return
-            posts.sort(key=lambda q: q.get("at", ""))
+            fresh.sort(key=lambda q: q.get("at", ""))
             normalized = [{"at": q["at"], "text": q["text"],
                            "kind": q.get("kind") or "post",
                            "key": q.get("id") or q["at"]}
-                          for q in posts]
+                          for q in fresh]
+            from .announcements import _text_key
+            seen_keys = {e["key"] for e in normalized}
+            seen_text = {_text_key(e["text"]) for e in normalized}
+            kept = []
+            for e in (self.state.news_log or []):
+                at = e.get("at", "")
+                if not at or _post_age_hours(at) > 48:
+                    continue
+                if (e.get("key") or at) in seen_keys:
+                    continue
+                if _text_key(e.get("text", "")) in seen_text:
+                    continue
+                kept.append(e)
+            combined = kept + normalized
+            combined.sort(key=lambda q: q.get("at", ""))
+            combined = combined[-200:]
             st = self.state
-            if st.news_log != normalized:
-                st.news_log = normalized
+            if st.news_log != combined:
+                st.news_log = combined
                 save_state(st)
                 self._state_mtime = os.path.getmtime(st.state_path)
         except Exception:
